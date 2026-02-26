@@ -1,0 +1,719 @@
+---
+title: "Enhancer screen chromatin analyses"
+author: "Andreas R. Gschwind"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setupDocument, include=FALSE}
+# save.image("RDA/chromatin_plots.rda")
+# stop()
+
+# set output html chunk options
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+## Goal
+Make main figure chromatin analyses plots.
+```{r attachPackages}
+library(tidyverse)
+library(cowplot)
+library(ggpubr)
+```
+
+***
+
+## Input data
+Load all required input data
+```{r loadData}
+# load table with chromatin annotations for all ETPs
+etp <- read_csv(snakemake@input[[1]], show_col_types = FALSE)
+
+# for control perturbations which were in multiple panels, select the most significant one
+etp_ctrl <- etp %>% 
+  filter(ctrl_perturbation == TRUE) %>% 
+  group_by(response_id, grna_target) %>% 
+  slice_min(p_value, n = 1, with_ties = FALSE)
+
+# add back to results table with discovery pairs
+etp <- etp %>% 
+  filter(ctrl_perturbation == FALSE) %>% 
+  bind_rows(etp_ctrl) %>% 
+  arrange(desc(p_value))
+
+# add pseudocount to Hi-C interaction frequencies
+etp <- mutate(etp, hic_int_freq = hic_int_freq + 1)
+```
+
+***
+
+## Chromatin features across ETP classes
+Plot chromatin features of all `r sum(etp$significant, na.rm = TRUE)` hits across all classes of
+perturbed target-gene pairs, including promoter and distal enhancer targeting perturbations.
+
+```{r redefineClasses}
+etp <- etp %>% 
+  mutate(class_manuscript = case_when(
+    class_manuscript == "promoter-distal" & pert_chr != gene_chr ~ "promoter-trans",
+    class_manuscript == "intragenic-distal" & pert_chr != gene_chr ~ "intragenic-trans",
+    class_manuscript == "intergenic-distal" & pert_chr != gene_chr ~ "intergenic-trans",
+    TRUE ~ class_manuscript
+  ))
+```
+
+
+```{r prepareData1}
+# features to include in plot
+features <- c("log_2_fold_change", "enh_signal_count_DNase-seq", "enh_signal_avg_H3K27ac",
+              "enh_signal_avg_H3K4me1", "enh_signal_avg_H3K4me3", "hic_int_freq")
+
+# extract features for significant ETPs
+etp_feat <- etp %>% 
+  select(response_id, grna_target, class_manuscript, significant, dist_to_tss, likely_trans_effect,
+         all_of(features)) %>% 
+  pivot_longer(cols = all_of(features), names_to = "feature", values_to = "value") %>% 
+  mutate(dist_to_tss = abs(dist_to_tss))
+
+# reformat feature names for plot
+etp_feat <- etp_feat %>% 
+  mutate(feature = case_when(
+    feature == "log_2_fold_change" ~ "Effect size",
+    feature == "hic_int_freq" ~ "Hi-C 3D contact",
+    TRUE ~ sub(".+_(.+)", "\\1", feature)
+  ))
+
+# convert classes to factors for correct ordering
+class_levels <- c("promoter-proximal", "promoter-distal", "promoter-trans", "intragenic-proximal",
+                  "intragenic-distal", "intragenic-trans", "intergenic-distal", "intergenic-trans")
+etp_feat <- etp_feat %>% 
+  mutate(class_manuscript = factor(class_manuscript, levels = rev(class_levels)))
+
+# extract positive hits only for plots
+etp_feat_sig <- filter(etp_feat, significant == TRUE)
+
+# add effect size as separate column
+etp_feat_sig <- etp_feat_sig %>% 
+  filter(feature == "Effect size") %>% 
+  select(response_id, grna_target, effect_size = value) %>%
+  left_join(etp_feat_sig, ., by = c("response_id", "grna_target"))
+
+# add group for coloring based on element location
+etp_feat_sig <- mutate(etp_feat_sig, class_color = sub("-.*", "", class_manuscript))
+```
+
+The median feature signals are computed to use as baseline reference in subsequent plots.
+```{r calcAverageFeatureValues}
+# calculate average feature values across all tested ETP
+avg_feature_values <- etp_feat %>% 
+  group_by(feature) %>% 
+  summarize(mean = mean(value, na.rm = TRUE),
+            median = median(value, na.rm = TRUE))
+
+# calculate average feature values across all negative tested elements
+positive_elements <- unique(pull(filter(etp_feat, significant == TRUE), grna_target))
+avg_feature_values_negatives <- etp_feat %>% 
+  filter(!grna_target %in% positive_elements) %>% 
+  group_by(feature) %>% 
+  summarize(mean = mean(value, na.rm = TRUE),
+            median = median(value, na.rm = TRUE))
+```
+
+Plot chromatin feature value distributions of positive hits across the different ETP classes for
+each assay.
+```{r customPlotTheme}
+custom_theme <- function(...) {
+  theme_bw(...) %+replace% {
+    theme(
+      axis.title.y = element_blank(), panel.grid = element_blank(),
+      strip.background = element_blank(),
+      axis.title.x = element_text(size = 9, color = "black"),
+      axis.text.x = element_text(size = 9, color = "black"),
+      axis.text.y = element_text(size = 9, color = "black"),
+      strip.text = element_text(size = 11, color = "black")
+    )
+  }
+}
+```
+
+### Colored by element position
+Make plot with classes colored by element location (promoter, intragenic, intergenic).
+```{r plotChromClassColor}
+# colors for each class
+class_colors <- c(promoter = "coral3", intragenic = "goldenrod", intergenic = "steelblue")
+
+# make effect size plot
+es_dat <- filter(etp_feat_sig, feature == "Effect size")
+es_plot <- ggplot(es_dat, aes(y = class_manuscript, x = value, color = class_color)) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = expression("log"[2] ~ "fold change"), color = "Element\nposition") +
+  scale_color_manual(values = class_colors) +
+  custom_theme()
+
+# make DNase-seq plot
+dnase_dat <- filter(etp_feat_sig, feature == "DNase-seq")
+dnase_plot <- ggplot(dnase_dat,
+                     aes(y = class_manuscript, x = value, color = class_color)) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  geom_vline(data = filter(avg_feature_values, feature == "DNase-seq"),
+             aes(xintercept = median), linetype = "dashed") +
+  labs(x = "Read depth normalized\nsignal", color = "Element\nposition") +
+  scale_color_manual(values = class_colors) +
+  scale_x_log10() +
+  custom_theme()
+
+# make ChIP-seq plot
+chip_assays <- c("H3K27ac", "H3K4me1", "H3K4me3")
+chip_data <- filter(etp_feat_sig, feature %in% chip_assays)
+chip_plot <- ggplot(chip_data,
+                    aes(y = class_manuscript, x = value, color = class_color)) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  geom_vline(data = filter(avg_feature_values, feature %in% chip_assays),
+             aes(xintercept = median), linetype = "dashed") +  
+  labs(x = "Fold change over control", color = "Element\nposition") +
+  scale_x_log10() +
+  scale_color_manual(values = class_colors) +
+  custom_theme()
+
+# make Hi-C plot
+hic_data <- filter(etp_feat_sig, feature == "Hi-C 3D contact")
+hic_plot <- ggplot(hic_data,
+                   aes(y = class_manuscript, x = value, color = class_color)) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  labs(x = "Hi-C interaction\nfrequency + 1", color = "Element\nposition") +
+  scale_x_log10() +
+  scale_color_manual(values = class_colors) +
+  custom_theme()
+```
+
+```{r arrangeChromClassColorPlot1, fig.height=4, fig.width=12}
+# extract legend from one plot
+legend <- get_legend(es_plot)
+
+# arrange all plots into one set
+panels <- plot_grid(
+  es_plot + theme(legend.position = "none"),
+  dnase_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                     legend.position = "none"),
+  chip_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                    legend.position = "none"),
+  hic_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                   legend.position = "none"),
+  nrow = 1, align = "h", rel_widths = c(0.9, 0.5, 1.4, 0.5, 0.5), scale = 0.95
+)
+
+# combine with legend to assemble entire panel
+plot_grid(panels, legend, rel_widths = c(1, 0.1))
+```
+
+```{r arrangeChromClassColorPlot2, fig.height=4, fig.width=10.25}
+# extract legend from one plot
+legend <- get_legend(es_plot)
+
+# arrange all plots into one set
+panels <- plot_grid(
+  es_plot + theme(legend.position = "none"),
+  dnase_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                     legend.position = "none"),
+  chip_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                    legend.position = "none"),
+  nrow = 1, align = "h", rel_widths = c(0.9, 0.5, 1.4, 0.5), scale = 0.95
+)
+
+# combine with legend to assemble entire panel
+plot_grid(panels, legend, rel_widths = c(1, 0.1))
+```
+
+### Colored by distance
+Make plot colored by distance to TSS.
+```{r plotChromClassesDistColor}
+# make effect size plot
+es_dat <- filter(etp_feat_sig, feature == "Effect size")
+es_plot <- ggplot(es_dat, aes(y = class_manuscript, x = value, color = log10(dist_to_tss + 1))) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = expression("log"[2] ~ "fold change"), color = "Dist. TSS") +
+  scale_colour_gradient(low = "#d10202", high = "#025fc9") +
+  custom_theme()
+
+# make DNase-seq plot
+dnase_dat <- filter(etp_feat_sig, feature == "DNase-seq")
+dnase_plot <- ggplot(dnase_dat,
+                     aes(y = class_manuscript, x = value, color = log10(dist_to_tss + 1))) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  geom_vline(data = filter(avg_feature_values, feature == "DNase-seq"),
+             aes(xintercept = median), linetype = "dashed") +
+  labs(x = "Read depth normalized\nsignal", color = "Dist. TSS") +
+  scale_colour_gradient(low = "#d10202", high = "#025fc9") +
+  scale_x_log10() +
+  custom_theme()
+
+# make ChIP-seq plot
+chip_assays <- c("H3K27ac", "H3K4me1", "H3K4me3")
+chip_data <- filter(etp_feat_sig, feature %in% chip_assays)
+chip_plot <- ggplot(chip_data,
+                    aes(y = class_manuscript, x = value, color = log10(dist_to_tss + 1))) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  geom_vline(data = filter(avg_feature_values, feature %in% chip_assays),
+             aes(xintercept = median), linetype = "dashed") +  
+  labs(x = "Fold change over control", color = "Dist. TSS") +
+  scale_x_log10() +
+  scale_colour_gradient(low = "#d10202", high = "#025fc9") +
+  custom_theme()
+
+# make Hi-C plot
+hic_data <- filter(etp_feat_sig, feature == "Hi-C 3D contact")
+hic_plot <- ggplot(hic_data,
+                   aes(y = class_manuscript, x = value, color = log10(dist_to_tss + 1))) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  labs(x = "Hi-C interaction\nfrequency + 1", color = "Dist. TSS") +
+  scale_x_log10() +
+  scale_colour_gradient(low = "#d10202", high = "#025fc9") +  
+  custom_theme()
+```
+
+```{r arrangeChromClassesDistColorPlot, fig.height=4, fig.width=12}
+# extract legend from one plot
+legend <- get_legend(es_plot)
+
+# arrange all plots into one set
+panels <- plot_grid(
+  es_plot + theme(legend.position = "none"),
+  dnase_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                     legend.position = "none"),
+  chip_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                    legend.position = "none"),
+  hic_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                   legend.position = "none"),
+  nrow = 1, align = "h", rel_widths = c(0.9, 0.5, 1.4, 0.5, 0.5), scale = 0.95
+)
+
+# combine with legend to assemble entire panel
+plot_grid(panels, legend, rel_widths = c(1, 0.1))
+```
+
+### Colored by effect size
+Make plot colored by CRISPRi effect sizes.
+```{r plotChromClassesESColor}
+# make effect size plot
+es_dat <- filter(etp_feat_sig, feature == "Effect size")
+es_plot <- ggplot(es_dat, aes(y = class_manuscript, x = value, color = effect_size)) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = expression("log"[2] ~ "fold change"), color = "Effect size\n(log2 FC)") +
+  scale_colour_gradientn(colors = c("red", "red3", "purple3", "blue3", "blue")) +
+  custom_theme()
+
+# make DNase-seq plot
+dnase_dat <- filter(etp_feat_sig, feature == "DNase-seq")
+dnase_plot <- ggplot(dnase_dat,
+                     aes(y = class_manuscript, x = value, color = effect_size)) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  geom_vline(data = filter(avg_feature_values, feature == "DNase-seq"),
+             aes(xintercept = median), linetype = "dashed") +
+  labs(x = "Read depth normalized\nsignal", color = "Effect size\n(log2 FC)") +
+  scale_colour_gradientn(colors = c("red", "red3", "purple3", "blue3", "blue")) +
+  scale_x_log10() +
+  custom_theme()
+
+# make ChIP-seq plot
+chip_assays <- c("H3K27ac", "H3K4me1", "H3K4me3")
+chip_data <- filter(etp_feat_sig, feature %in% chip_assays)
+chip_plot <- ggplot(chip_data,
+                    aes(y = class_manuscript, x = value, color = effect_size)) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  geom_vline(data = filter(avg_feature_values, feature %in% chip_assays),
+             aes(xintercept = median), linetype = "dashed") +  
+  labs(x = "Fold change over control", color = "Effect size\n(log2 FC)") +
+  scale_x_log10() +
+  scale_colour_gradientn(colors = c("red", "red3", "purple3", "blue3", "blue")) +
+  custom_theme()
+
+# make Hi-C plot
+hic_data <- filter(hic_data, feature == "Hi-C 3D contact")
+hic_plot <- ggplot(hic_data,
+                   aes(y = class_manuscript, x = value, color = effect_size)) +
+  facet_wrap(~feature, nrow = 1, scales = "free_x") +
+  geom_jitter(height = 0.2, pch = 16) +
+  geom_boxplot(outlier.shape = NA, fill = NA, width = 0.5, color = "black") +
+  labs(x = "Hi-C interaction\nfrequency + 1", color = "Effect size\n(log2 FC)") +
+  scale_x_log10() +
+  scale_colour_gradientn(colors = c("red", "red3", "purple3", "blue3", "blue")) +
+  custom_theme()
+```
+
+```{r arrangeChromClassesESColorPlot, fig.height=4, fig.width=12}
+# extract legend from one plot
+legend <- get_legend(es_plot)
+
+# arrange all plots into one set
+panels <- plot_grid(
+  es_plot + theme(legend.position = "none"),
+  dnase_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                     legend.position = "none"),
+  chip_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                    legend.position = "none"),
+  hic_plot + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                   legend.position = "none"),
+  nrow = 1, align = "h", rel_widths = c(0.9, 0.5, 1.4, 0.5, 0.5), scale = 0.95
+)
+
+# combine with legend to assemble entire panel
+plot_grid(panels, legend, rel_widths = c(1, 0.1))
+```
+
+***
+
+## Intragenic enhancers
+```{r, fig.width=8, fig.height=3}
+# extract chromatin features for intragenic distal enhancers
+intragenic_enh <- etp_feat_sig %>% 
+  filter(class_manuscript == "intragenic-distal") %>% 
+  mutate(feature = fct_relevel(feature, "Effect size"))
+
+# extract results for enhancers within their host gene
+intragenic_proximal_pairs <- filter(etp, class_manuscript == "intragenic-proximal")
+
+# get the distance to host gene tss for each perturbation
+dist_to_host_tss <- etp %>% 
+  filter(class_manuscript == "intragenic-proximal") %>% 
+  group_by(grna_target) %>% 
+  summarize(dist_to_host_tss = min(abs(dist_to_tss)))
+
+# add distance to host gene to intragenic-distal hits
+intragenic_enh <- left_join(intragenic_enh, dist_to_host_tss, by = "grna_target")
+
+# get intragenic perturbations with effects on their host genes
+host_hits <- intragenic_proximal_pairs %>% 
+  filter(significant == TRUE) %>% 
+  pull(grna_target) %>% 
+  unique()
+
+# add information to intragenic enhancers
+intragenic_enh <- mutate(intragenic_enh, host_hit = grna_target %in% host_hits)
+```
+
+Look at position of intragenic enhancers within host genes and overlap with hits on host genes.
+```{r}
+# select effect size feature only for overall property plots
+intragenic_enh_es <- filter(intragenic_enh, feature == "Effect size")
+
+# plot proportion of host hits
+host_hits_counts <- count(intragenic_enh_es, likely_trans_effect, host_hit, name = "hits")
+plot_hist_hits <- ggplot(host_hits_counts, aes(x = likely_trans_effect, y = hits, fill = host_hit)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Effects on host gene", y = "Hits", x = "Gene-gene interaction",
+       fill = "Host gene hit") +
+  scale_fill_manual(values = c("TRUE" = "goldenrod1", "FALSE" = "turquoise3")) +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+
+# plot distance to host gene for intragenic enhancers
+plot_host_dist <- intragenic_enh_es %>% 
+  filter(feature == "Effect size") %>% 
+  ggplot(., aes(x = likely_trans_effect, y = dist_to_host_tss / 1000, color = likely_trans_effect)) +
+    geom_jitter(width = 0.2) +
+    geom_boxplot(fill = NA, color = "black", outlier.shape = NA, width = 0.5) +
+    labs(y = "Distance (kb)", x = "Gene-gene interaction", title = "Distance to host TSS") +
+    scale_color_manual(values = c("TRUE" = "red3", "FALSE" = "steelblue")) +
+    theme_bw() +
+    theme(panel.grid = element_blank(), legend.position = "none")
+```
+
+```{r, fig.width=7, fig.height=3}
+# arrange intragenic enhancer properties into one figure
+plot_grid(plot_hist_hits, plot_host_dist, nrow = 1, scale = 0.95, rel_widths = c(1, 0.75))
+```
+
+```{r, fig.height=3, fig.width=9}
+# set levels for features in average values table
+avg_feature_values <- mutate(avg_feature_values, feature = fct_relevel(feature, "Effect size"))
+
+# plot chromatin features between likely trans effects and others
+ggplot(intragenic_enh, aes(x = likely_trans_effect, y = value, color = likely_trans_effect)) +
+  facet_wrap(~feature, nrow = 1, scales = "free") +
+  geom_jitter(width = 0.2) +
+  geom_boxplot(fill = NA, color = "black", outlier.shape = NA, width = 0.5) +
+  geom_hline(data = avg_feature_values, aes(yintercept = median), linetype = "dashed") +  
+  labs(x = "Likely trans-acting interaction") +
+  scale_color_manual(values = c("TRUE" = "red3", "FALSE" = "steelblue")) +
+  theme_bw() +
+  theme(panel.grid = element_blank(), strip.background = element_blank(), legend.position = "none")
+```
+
+```{r}
+# filter out any intragenic-distal ETPs that are likely trans-effects
+etp_filt <- filter(etp, !(class_manuscript == "intragenic-distal" & likely_trans_effect == TRUE))
+```
+
+***
+
+## Distal enhancers
+Plot chromatin features of distal enhancers as function of distance to TSS.
+```{r prepareData2}
+# recalculate distance to TSS categories
+etp <- etp %>% 
+  mutate(distToTSS_bin = case_when(
+    class_manuscript == "promoter-proximal" ~ "TSS",
+    class_manuscript %in% c("intergenic-distal", "intragenic-distal") & (abs(dist_to_tss) > 1500 & abs(dist_to_tss) <= 1e4) ~ "1500-10k",
+    class_manuscript %in% c("intergenic-distal", "intragenic-distal") & (abs(dist_to_tss) > 1e4 & abs(dist_to_tss) <= 1e5) ~ "10k-100k",
+    class_manuscript %in% c("intergenic-distal", "intragenic-distal") & (abs(dist_to_tss) > 1e5 & abs(dist_to_tss) <= 1e6) ~ "100k-1Mb",
+    class_manuscript %in% c("intergenic-distal", "intragenic-distal") ~ ">1Mb",
+    TRUE ~ NA_character_
+  ))
+
+# make distance to TSS bin an ordered factor
+distToTSS_bin_levels <- c("TSS", "1500-10k", "10k-100k", "100k-1Mb", ">1Mb")
+etp <- mutate(etp, distToTSS_bin = fct_relevel(distToTSS_bin, distToTSS_bin_levels))
+
+# filter for specified E-G pairs to include in analysis
+enh_etp <- etp %>%
+  filter(!is.na(significant)) %>% 
+  filter(class_manuscript %in% c("intergenic-distal", "promoter-proximal"))
+
+# chromatin assays to include in plot
+chrom_assays <- c("enh_signal_count_DNase-seq", "enh_signal_avg_H3K27ac", "enh_signal_avg_H3K4me1",
+                  "enh_signal_avg_H3K4me3")
+
+# select any elements that were detected as positives and categorize by distance
+all_bins <- c("hit TSS", "hit 1500-10k", "hit 10k-100k", "hit 100k-1Mb", "hit >1Mb", "NS")
+positives <- enh_etp %>% 
+  filter(significant == TRUE) %>% 
+  mutate(category = paste("hit", distToTSS_bin)) %>%
+  mutate(category = factor(category, levels = all_bins, ordered = TRUE) )
+
+# select unique enhancers and assays to plot
+positives <- positives %>% 
+  select(grna_target, significant, category, all_of(chrom_assays)) %>% 
+  distinct()
+
+# if an enhancer is counted in multiple categories, assign it to the closest distance to TSS bin
+positives <- positives %>% 
+  group_by(grna_target) %>% 
+  slice_min(category, n = 1)
+
+# filter for enhancers that are not linked to any gene and select columns for plot
+negatives <- enh_etp %>% 
+  filter(significant == FALSE, !grna_target %in% positives$grna_target) %>% 
+  mutate(category = factor("NS", levels = all_bins, ordered = TRUE)) %>% 
+  select(grna_target, significant, category, all_of(chrom_assays)) %>% 
+  distinct()
+
+# combine back into one table and convert to long format for plots
+plot_etp <- bind_rows(positives, negatives) %>% 
+  pivot_longer(cols = all_of(chrom_assays),
+               names_to = "column_name", values_to = "signal") %>% 
+  mutate(column_name = sub("enh_signal_", "", column_name)) %>% 
+  separate(column_name, into = c("metric", "assay"), sep = "_")
+```
+
+```{r makeChromDistPlot}
+# perform statistical tests (kruskal-wallis) between categories
+kw_tests <- plot_etp %>% 
+  ungroup() %>% 
+  compare_means(formula = signal ~ category, method = "kruskal.test", data = ., group.by = "assay") %>% 
+  mutate(p.adj.plot = if_else(p.adj < 0.001, true = "< 0.001",
+                              false = paste("=", round(p.adj, digits = 2))))
+
+# get sample sizes per category group
+sample_sizes <- plot_etp %>% 
+  ungroup() %>% 
+  select(grna_target, category) %>% 
+  distinct() %>% 
+  arrange(category) %>% 
+  count(category, .drop = FALSE)
+
+# set new labels (factor levels) for each category, which include sample size per category
+levels <- paste0(sample_sizes$category, " (n=", sample_sizes$n, ")")
+levels(plot_etp$category) <- levels
+
+# add mock group to KW test table
+kw_tests <- mutate(kw_tests, group1 = levels[[2]], group2 = levels[[3]])
+
+# colors for enhancer categories in figures
+category_colors <- structure(c("#daa520", "#0263a3", "#4299d4", "#6ebff5", "#9ad8fc", "#a9a9a9"),
+                             names = levels)
+
+# plot DNase-seq accessibility
+p1 <- ggplot(filter(plot_etp, assay == "DNase-seq"),
+             aes(x = category, y = signal + 1, fill = category)) +
+  facet_wrap(~ assay, nrow = 1) +
+  geom_boxplot() +
+  stat_pvalue_manual(data = filter(kw_tests, assay == "DNase-seq"), y.position = 15000, size = 3,
+                     label = "P adj. {p.adj.plot}", remove.bracket = TRUE, inherit.aes = FALSE) +
+  labs(y = paste0("Read-depth normalized", "\n", "signal")) +
+  scale_fill_manual(values = category_colors) +
+  scale_y_log10(limits = c(1, 20000)) +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank(), panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+# plot ChIP-seq signals
+p2 <- ggplot(filter(plot_etp, assay %in% c("H3K27ac", "H3K4me1", "H3K4me3")),
+             aes(x = category, y = signal + 0.01, fill = category)) +
+  facet_wrap(~ assay, nrow = 1) +
+  geom_boxplot() +
+  stat_pvalue_manual(data = filter(kw_tests, assay %in% c("H3K27ac", "H3K4me1", "H3K4me3")),
+                     y.position = 120, size = 3, label = "P adj. {p.adj.plot}",
+                     remove.bracket = TRUE, inherit.aes = FALSE) +
+  labs(y = "FC over control") +
+  scale_fill_manual(values = category_colors) +
+  scale_y_log10(limits = c( 0.01, 150)) +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank(), panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+```
+
+```{r arrangeChromDistPlot, fig.height=3, fig.width=7}
+# assemble figure panel and save to pdf
+plot_grid(p1, p2, nrow = 1, rel_widths = c(0.5, 1))
+```
+
+```{r ChromDistPWTests}
+# perform individual pairwise tests
+pw_tests <- compare_means(signal ~ category, group.by = "assay", data = ungroup(plot_etp),
+                          method = "wilcox.test", p.adjust.method = "holm")
+
+# split category labels in to labels and number of enhancers
+pw_tests <- pw_tests %>% 
+  separate(group1, into = c("group1", "n_group1"), sep = " \\(n=") %>% 
+  separate(group2, into = c("group2", "n_group2"), sep = " \\(n=") %>% 
+  mutate(n_group1 = sub("\\)", "", n_group1), n_group2 = sub("\\)", "", n_group2)) %>% 
+  select(-.y.)
+
+# save to text file
+write_csv(pw_tests, file = "results/tables/chromatin_features_distal_pairwise_tests.csv")
+```
+
+***
+
+## 3D interaction frequency
+Plot Hi-C 3D interaction frequencies of distal interactions as function of distance to TSS.
+```{r prepareData3}
+# add significance label for Hi-C plot
+enh_etp <- enh_etp %>% 
+  mutate(sig_label = if_else(significant, true = "Sig.", false = "NS")) %>% 
+  add_count(sig_label) %>% 
+  mutate(sig_label = paste0(sig_label, " (n=", n, ")")) %>% 
+  mutate(sig_label = fct_reorder(sig_label, n)) %>% 
+  select(-n)
+
+# create new distance to TSS bin levels which include number of pairs
+distToTSS_levels <- enh_etp %>% 
+  group_by(distToTSS_bin) %>% 
+  summarize(sig = sum(significant == TRUE),
+            nonsig = sum(significant == FALSE)) %>% 
+  mutate(distToTSS_bin = as.character(distToTSS_bin)) %>% 
+  mutate(distToTSS_label = paste0(distToTSS_bin, "\nSig.=", sig, "\nNS=", nonsig)) %>% 
+  select(distToTSS_label, distToTSS_bin) %>% 
+  deframe()
+
+# change distance to TSS labels in ETP table
+enh_etp <- mutate(enh_etp, distToTSS_bin = fct_recode(distToTSS_bin, !!!distToTSS_levels))
+
+# set colors for significance labels which include number of pairs
+sig_cols <- structure(c("steelblue", "darkgray"), names = levels(enh_etp$sig_label))
+
+# set NA interaction frequency to 0
+enh_etp <- replace_na(enh_etp, replace = list(hic_int_freq = 0))
+
+# calculate distance to TSS in bin increments
+enh_etp <- enh_etp %>% 
+  mutate(hic_bin_dist = abs(dist_to_tss) %/% snakemake@params$hic_res * snakemake@params$hic_res)
+```
+
+```{r plotHicDistBins, fig.height=3.5, fig.width=6}
+# plot interaction frequencies per distance to TSS bin
+ggplot(enh_etp, aes(x = distToTSS_bin, y = hic_int_freq + 1, fill = sig_label)) +
+  geom_boxplot() +
+  labs(y = "Hi-C interaction frequency + 1", x = "Distance to TSS", fill = "Significance") +
+  scale_fill_manual(values = sig_cols) +
+  scale_y_log10(limits = c(1, 1000)) +
+  theme_bw()
+```
+
+```{r plotHicDist, fig.height=3.5, fig.width=6.5}
+# only look at results within 1Mb (typical enhancer range)
+enh_etp_filt <- enh_etp %>% 
+  filter(abs(dist_to_tss) <= 1e6) %>% 
+  mutate(sig_label = if_else(significant, true = "Sig.", false = "NS")) %>% 
+  add_count(sig_label) %>% 
+  mutate(sig_label = paste0(sig_label, " (n=", n, ")")) %>% 
+  mutate(sig_label = fct_reorder(sig_label, n)) %>% 
+  select(-n)
+
+# make simple 2 group boxplot
+p1 <- ggplot(enh_etp_filt, aes(x = sig_label, y = hic_int_freq + 1, fill = sig_label)) +
+  geom_boxplot() +
+  labs(y = "Hi-C interaction frequency + 1", x = "") +
+  scale_fill_manual(values = c("steelblue", "gray66")) +
+  scale_y_log10(limits = c(1, 1000)) +
+  theme_bw() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+
+# plot interaction frequencies as function of distance to TSS
+p2 <- ggplot(enh_etp_filt, aes(x = abs(dist_to_tss) / 1000, y = hic_int_freq + 1, color = sig_label)) +
+  geom_point(data = filter(enh_etp_filt, significant == FALSE)) +
+  geom_point(data = filter(enh_etp_filt, significant == TRUE)) +
+  geom_smooth(data = filter(enh_etp_filt, significant == FALSE), se = FALSE, color = "gray40") +
+  geom_smooth(data = filter(enh_etp_filt, significant == TRUE), se = FALSE, color = "steelblue") +
+  labs(y = "Hi-C interaction frequency + 1", x = "Distance to TSS (kb)", color = "Significance") +
+  scale_color_manual(values = c("gray66", "steelblue")) +
+  scale_x_log10(limits = c(1, NA)) +
+  scale_y_log10(limits = c(1, 1000)) +
+  theme_bw() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank())
+
+# arrange into one figure and save to pdf file
+plot_grid(p1, p2, nrow = 1, rel_widths = c(0.27, 0.73), align = "h")
+```
+
+```{r plotHicDistBinsPWTests}
+# perform individual pairwise tests
+pw_tests <- compare_means(hic_int_freq ~ significant, data = enh_etp, group.by = "distToTSS_bin",
+                          method = "wilcox.test", p.adjust.method = "holm")
+
+# split category labels in to labels and number of enhancers
+pw_tests <- pw_tests %>% 
+  select(-c(.y., group1, group2)) %>% 
+  separate(distToTSS_bin, into = c("distToTSS_bin", "group1", "n_group1", "group2", "n_group2"),
+           sep = "\n|=")
+
+# save to text file
+write_csv(pw_tests, file = "results/tables/hic_interaction_frequency_distBins_pairwise_tests.csv")
+```
+
+***
+
+## Session information
+This document was produced using following packages:
+```{r sessionInfo}
+sessionInfo()
+```

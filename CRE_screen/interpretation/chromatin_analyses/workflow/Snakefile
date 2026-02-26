@@ -1,0 +1,84 @@
+## Create figures for CRE chromatin and other miscellaneous analyses 
+
+configfile: "config/config.yml"
+
+include: "rules/chromatin_assays.smk"
+include: "rules/chromatin_analyses.smk"
+include: "rules/miscellaneous_analyses.smk"
+
+# perform all analyses
+rule all:
+  input:
+    "results/results_df_with_promoterC_annotated_allFeatures.csv",
+    "results/genome_browser_tracks/results_with_promoterC_crispr_elements.bed",
+    "results/genome_browser_tracks/results_with_promoterC_significant_cis_crispr_etps.bedpe",
+    "results/genome_browser_tracks/results_with_promoterC_nonSignificant_cis_crispr_etps.bedpe",
+    "results/chromatin_features_etp_classes.html",
+    "results/plots/prioritization_volcano_plot.pdf",
+    "results/plots/tapseq_panel_summary_plots.pdf",
+    "results/plots/cre_screen_sceptre_qq_plots_tail_4by4.pdf",
+    "results/share/cre_perturbation_screen_results.csv",
+    "results/misc_numbers.txt"
+    
+# create genes annotation for downstream analyses
+rule create_genes_annot:
+  input:
+    genome = config["genome"],
+    target_genes = "resources/target_genes.gtf.gz"
+  output: "resources/genes.gtf"
+  conda: "envs/otar_cre_figures.yml"
+  script:
+    "scripts/create_genes_annot.R"
+
+# extend manual perturbation coordinates for promoter control perturbations to +/- 250bp around TSS
+rule extend_prom_coords:
+  input: "resources/manual_perturbation_coordinates.tsv"
+  output: temp("resources/manual_perturbation_coordinates_ext.tsv")
+  params:
+    extend_tss = 250
+  conda: "envs/otar_cre_figures.yml"
+  script:
+    "scripts/extend_prom_coords.R"
+    
+# process E-G pair prioritization table
+rule process_eg_prioritization:
+  input: config["eg_prioritization"]
+  output: "resources/process_eg_prioritization.csv"
+  conda: "envs/otar_cre_figures.yml"
+  script:
+    "scripts/process_eg_prioritization.R"
+    
+# add manual perturbation coordinates to results table and compute distance to TSS
+rule add_to_results_table:
+  input:
+    etps = lambda wildcards: config["results"][wildcards.analysis]["file"],
+    pert_coords = "resources/manual_perturbation_coordinates_ext.tsv",
+    gene_annot = "resources/genes.gtf",
+    eg_prioritization = "resources/process_eg_prioritization.csv"
+  output: temp("results/results_df_{analysis}_complete.csv")
+  params:
+    group_col = lambda wildcards: config["results"][wildcards.analysis]["group_col"]
+  conda: "envs/otar_cre_figures.yml"
+  script:
+    "scripts/add_to_results_table.R"
+
+# annotate ETP results table
+rule annotate_etp_table:
+  input:
+    etps = "results/results_df_{analysis}_complete.csv",
+    gene_annot = "resources/genes.gtf"
+  output: "results/results_df_{analysis}_annotated.csv"
+  conda: "envs/otar_cre_figures.yml"
+  script:
+    "scripts/annotate_etp_table.R"
+    
+# make .bedpe files to visualize E-G pairs
+rule make_bedpe_tracks:
+  input: "results/results_df_{analysis}_annotated_allFeatures.csv"
+  output: 
+    elements = "results/genome_browser_tracks/results_{analysis}_crispr_elements.bed",
+    sig_bedpe = "results/genome_browser_tracks/results_{analysis}_significant_cis_crispr_etps.bedpe",
+    nonsig_bedpe = "results/genome_browser_tracks/results_{analysis}_nonSignificant_cis_crispr_etps.bedpe"
+  conda: "envs/otar_cre_figures.yml"
+  script:
+    "scripts/make_bedpe_tracks.R"

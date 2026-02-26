@@ -1,0 +1,54 @@
+guide_assignments:
+  Panel1: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel1/all_sceptre_output/grna_assignment_matrix.rds
+  Panel2: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel2/all_sceptre_output/grna_assignment_matrix.rds
+  Panel3: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel3/all_sceptre_output/grna_assignment_matrix.rds
+  Panel4: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel4/all_sceptre_output/grna_assignment_matrix.rds
+  Panel5: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel5/all_sceptre_output/grna_assignment_matrix.rds
+  Panel6: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel6/all_sceptre_output/grna_assignment_matrix.rds
+  Panel7: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel7/all_sceptre_output/grna_assignment_matrix.rds
+  Panel8: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel8/all_sceptre_output/grna_assignment_matrix.rds
+  Panel9: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel9/all_sceptre_output/grna_assignment_matrix.rds
+  Panel10: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel10/all_sceptre_output/grna_assignment_matrix.rds
+  Panel11: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel11/all_sceptre_output/grna_assignment_matrix.rds
+  Panel12: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel12/all_sceptre_output/grna_assignment_matrix.rds
+  Panel13: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel13/all_sceptre_output/grna_assignment_matrix.rds
+  Panel14: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel14/all_sceptre_output/grna_assignment_matrix.rds
+  Panel15: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel15/all_sceptre_output/grna_assignment_matrix.rds
+  Panel16: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel16/all_sceptre_output/grna_assignment_matrix.rds
+
+sceptre_objects:
+  Panel1: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel1/sceptre_obj.rds
+  Panel2: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel2/sceptre_obj.rds
+  Panel3: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel3/sceptre_obj.rds
+  Panel4: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel4/sceptre_obj.rds
+  Panel5: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel5/sceptre_obj.rds
+  Panel6: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel6/sceptre_obj.rds
+  Panel7: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel7/sceptre_obj.rds
+  Panel8: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel8/sceptre_obj.rds
+  Panel9: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel9/sceptre_obj.rds
+  Panel10: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel10/sceptre_obj.rds
+  Panel11: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel11/sceptre_obj.rds
+  Panel12: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel12/sceptre_obj.rds
+  Panel13: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel13/sceptre_obj.rds
+  Panel14: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel14/sceptre_obj.rds
+  Panel15: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel15/sceptre_obj.rds
+  Panel16: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel16/sceptre_obj.rds
+
+finished_sceptre_objects:
+  Panel1: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel1/all_sceptre_output/sceptre_obj_finished.RDS
+  Panel10: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel10/sceptre_obj_finished.rds
+  Panel11: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel11/sceptre_obj_finished.rds
+  Panel12: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel12/sceptre_obj_finished.rds
+  Panel13: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel13/sceptre_obj_finished.rds
+  Panel14: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel14/sceptre_obj_finished.rds
+  Panel15: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel15/sceptre_obj_finished.rds
+  Panel16: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel16/sceptre_obj_finished.rds
+  Panel2: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel2/sceptre_obj_finished.rds
+  Panel3: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel3/sceptre_obj_finished.rds
+  Panel4: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel4/sceptre_obj_finished.rds
+  Panel5: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel5/sceptre_obj_finished.rds
+  Panel6: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel6/sceptre_obj_finished.rds
+  Panel7: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel7/sceptre_obj_finished.rds
+  Panel8: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel8/sceptre_obj_finished.rds
+  Panel9: /g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel9/sceptre_obj_finished.rds
+
