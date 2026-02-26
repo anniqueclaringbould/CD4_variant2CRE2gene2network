@@ -1,0 +1,12 @@
+name: run_workflow
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12.5
+  - pandas=2.2.2
+  - r-base=4.4.1
+  - r-r.utils=2.13.0
+  - r-tidyverse=2.0.0 
+  - r-yaml=2.3.10
+  

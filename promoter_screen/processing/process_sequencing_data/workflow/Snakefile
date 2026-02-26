@@ -1,0 +1,102 @@
+
+import os
+
+# main config file
+configfile: "config/config.yml"
+
+# add all samples and optional cell numbers to snakemake config object
+include: "scripts/add_samples_to_config.py"
+
+# process data for all samples
+pipeline_samples = [s.replace("_", "-") for s in config["samples"]]
+file_basenames = [s + '/' + p for s, p in zip(config["samples"], pipeline_samples)]
+rule all:
+  input:
+    expand("results/{file_basenames}_{file}", file_basenames = file_basenames,
+           file = ["Seurat.rds", "Pipeline_Report.html"])
+
+# Rules to make alignment reference (optional) -----------------------------------------------------
+
+# input function to get optional extra sequences file if specified
+def get_extra_seqs_file(wildcards):
+  file = config["make_reference"]["extra_sequences"]
+  if ((file == "None") or (file == "Null") or (file == "NULL")):
+    file = []
+  return file
+
+# create input yml file to make alignment reference
+rule make_reference_yml:
+  input:
+    genome_fasta = config["make_reference"]["genome_fasta"],
+    genome_gtf = config["make_reference"]["genome_gtf"],
+    extra_sequences = get_extra_seqs_file
+  output: "resources/alignment_reference/reference_input.yml"
+  conda: "envs/run_workflow.yml"
+  resources:
+    mem_mb = "2000",
+    runtime = "1h"  
+  script:
+    "scripts/make_reference_yml.R"
+
+# optional rule to create alignment reference
+rule make_alignment_reference:
+  input: "resources/alignment_reference/reference_input.yml"
+  output: "resources/alignment_reference/Rhap_reference.tar.gz"
+  conda: "envs/run_workflow.yml"
+  resources:
+    slurm_partition = config["bigmem_partition"],
+    mem_mb = "128000",
+    runtime = "12h"  
+  shell:
+   "rhapsody makeRhapReference --outdir resources/alignment_reference {input}"
+
+# Rules to process sequencing data -----------------------------------------------------------------
+
+# input function to get read files (symlinks) for one sample
+def get_read_files(wildcards):
+  read_files = config["read_files"][wildcards.sample]
+  read_files = ["resources/reads/" + s for s in read_files]
+  return(read_files)
+
+# create local symlink for input file to prevent potential file name issues
+rule create_reads_symlink:
+  input: lambda wildcards: config["symlinks"][wildcards.file]
+  output: "resources/reads/{file}"
+  conda: "envs/run_workflow.yml"
+  shell:
+    "ln -s {input} {output}"
+
+# create the yaml file specifying all input and pipeline parameters for one sample
+rule make_input_yml:
+  input:
+    reads = get_read_files,
+    reference = config["reference"]
+  output: "results/{sample}/{sample_out}_input.yml"
+  params:
+    cell_numbers = lambda wildcards: config["cell_numbers"][wildcards.sample],
+    generate_bam = False,
+    threads = config["threads"]
+  conda: "envs/run_workflow.yml"
+  resources:
+    mem_mb = "2000",
+    runtime = "1h"
+  script:
+    "scripts/make_input_yml.R"
+
+# run BD Rhapsody pipeline
+rule run_rhapsody:
+  input: "results/{sample}/{sample_out}_input.yml"
+  output:
+    seurat = "results/{sample}/{sample_out}_Seurat.rds",
+    report = "results/{sample}/{sample_out}_Pipeline_Report.html"
+  log: "results/{sample}/Logs/{sample_out}_std_error.log"
+  params:
+    outdir = "results/{sample}"
+  conda: "envs/run_workflow.yml"
+  threads: config["threads"]
+  resources:
+    slurm_partition = config["bigmem_partition"],
+    mem_mb = "128000",
+    runtime = "24h"
+  shell:
+    "rhapsody pipeline --outdir {params.outdir} {input} 2> {log}"

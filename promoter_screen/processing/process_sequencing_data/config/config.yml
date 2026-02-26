@@ -1,0 +1,32 @@
+
+# Samples and input files --------------------------------------------------------------------------
+
+# file containing all samples, one sample id per line with optional tab-separated second column for
+# cell numbers (no header)
+samples_file: "config/samples.tsv"
+
+# tab-separated file containing all input files per sample in long format (one file per line)
+reads_file: "config/read_files_generated.tsv"
+
+# Alignment reference ------------------------------------------------------------------------------
+
+# alignment reference to use with the Rhapsody pipeline. if you have an existing reference you would
+# like to use, provide it here. else the workflow will try to create a new reference in the
+# specified location based on the input files specified in 'make_reference'
+reference: "/g/steinmetz/project/otar_2063/references/alignment_reference/Rhap_reference_promoter_screen.tar.gz"
+
+# if the specified reference doesn't exist, specify input fasta, gtf, optional extra sequences to
+# build an aligment reference 
+make_reference:
+  genome_fasta: "/g/steinmetz/project/otar_2063/references/alignment_reference/hg38/fasta/default/hg38.fa"
+  genome_gtf:  "/g/steinmetz/project/otar_2063/references/alignment_reference/hg38/gencode_gtf/default/hg38.gtf"
+  extra_sequences: "/g/steinmetz/project/otar_2063/references/alignment_reference/guide_vector_seqs_promoter_screen.fasta"
+
+# Processing data ----------------------------------------------------------------------------------
+
+# number of threads to use to run BD Rhapsody pipeline
+threads: 32
+
+# to run on a HPC cluster specify a slurm partition with enough memory to run the main pipeline
+# other jobs will run on the default partition, or the one provided in a used snakemake profile
+bigmem_partition: "bigmem"
