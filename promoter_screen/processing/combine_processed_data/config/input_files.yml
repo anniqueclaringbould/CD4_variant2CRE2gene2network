@@ -1,0 +1,138 @@
+metric_files:
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_1/A3-1_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_2/A3-2_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_3/A3-3_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_4/A3-4_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_5/A3-5_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_6/A3-6_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_7/A3-7_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_8/A3-8_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_1/A6-1_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_2/A6-2_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_3/A6-3_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_4/A6-4_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_5/A6-5_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_6/A6-6_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_7/A6-7_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_8/A6-8_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_1/B2-1_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_2/B2-2_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_3/B2-3_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_4/B2-4_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_5/B2-5_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_6/B2-6_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_7/B2-7_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_8/B2-8_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_1/B5-1_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_2/B5-2_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_3/B5-3_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_4/B5-4_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_5/B5-5_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_6/B5-6_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_7/B5-7_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_8/B5-8_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_1/B8-1_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_2/B8-2_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_3/B8-3_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_4/B8-4_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_5/B8-5_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_6/B8-6_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_7/B8-7_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_8/B8-8_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_1/C1-1_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_2/C1-2_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_3/C1-3_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_4/C1-4_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_5/C1-5_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_6/C1-6_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_7/C1-7_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_8/C1-8_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_1/C4-1_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_2/C4-2_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_3/C4-3_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_4/C4-4_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_5/C4-5_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_6/C4-6_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_7/C4-7_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_8/C4-8_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_1/C7-1_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_2/C7-2_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_3/C7-3_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_4/C7-4_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_5/C7-5_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_6/C7-6_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_7/C7-7_Metrics_Summary.csv
+- /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_8/C7-8_Metrics_Summary.csv
+seurat_files:
+  A3:
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_1/A3-1_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_2/A3-2_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_3/A3-3_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_4/A3-4_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_5/A3-5_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_6/A3-6_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_7/A3-7_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A3_8/A3-8_Seurat.rds
+  A6:
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_1/A6-1_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_2/A6-2_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_3/A6-3_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_4/A6-4_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_5/A6-5_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_6/A6-6_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_7/A6-7_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/A6_8/A6-8_Seurat.rds
+  B2:
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_1/B2-1_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_2/B2-2_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_3/B2-3_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_4/B2-4_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_5/B2-5_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_6/B2-6_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_7/B2-7_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B2_8/B2-8_Seurat.rds
+  B5:
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_1/B5-1_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_2/B5-2_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_3/B5-3_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_4/B5-4_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_5/B5-5_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_6/B5-6_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_7/B5-7_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B5_8/B5-8_Seurat.rds
+  B8:
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_1/B8-1_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_2/B8-2_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_3/B8-3_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_4/B8-4_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_5/B8-5_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_6/B8-6_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_7/B8-7_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/B8_8/B8-8_Seurat.rds
+  C1:
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_1/C1-1_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_2/C1-2_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_3/C1-3_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_4/C1-4_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_5/C1-5_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_6/C1-6_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_7/C1-7_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C1_8/C1-8_Seurat.rds
+  C4:
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_1/C4-1_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_2/C4-2_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_3/C4-3_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_4/C4-4_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_5/C4-5_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_6/C4-6_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_7/C4-7_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C4_8/C4-8_Seurat.rds
+  C7:
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_1/C7-1_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_2/C7-2_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_3/C7-3_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_4/C7-4_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_5/C7-5_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_6/C7-6_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_7/C7-7_Seurat.rds
+  - /g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results/C7_8/C7-8_Seurat.rds

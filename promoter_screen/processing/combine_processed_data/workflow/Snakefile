@@ -1,0 +1,30 @@
+
+configfile: "config/config.yml"
+configfile: config["input_files"]
+
+# load rules to create sceptre objects
+include: "rules/create_seurat_object.smk"
+include: "rules/create_sceptre_object.smk"
+
+rule all:
+  input:
+    "results/combined_metric_summaries.rds",
+    "results/combined_seurat.rds",
+    "results/combined_sceptre_filtered/sceptre_object.rds",
+    "results/combined_sceptre_filtered/gene.odm",
+    "results/combined_sceptre_filtered/grna.odm",
+    expand("results/combined_sceptre_filtered_per_donor/{donor}/sceptre_object.rds",
+           donor = config["samples_per_donor"])
+
+# Create combined AnnData object -------------------------------------------------------------------
+    
+# create an AnnData object for analyses in python
+rule create_combined_anndata:
+  input: "results/combined_seurat.rds"
+  output: "results/combined_anndata.h5ad"
+  conda: "envs/combine_data.yml"
+  resources:
+    mem = "16G",
+    runtime = "3h"
+  script:
+    "scripts/create_combined_anndata.R"

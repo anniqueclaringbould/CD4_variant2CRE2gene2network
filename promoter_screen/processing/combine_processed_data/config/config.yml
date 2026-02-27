@@ -1,0 +1,30 @@
+
+# rhapsody pipeline processed output files
+input_directory: "/g/steinmetz/project/otar_2063/promoter_screen/processing/screen_data/results"
+input_files: "config/input_files.yml"
+
+# all metrics to extract from metric files
+qc_metrics: ["Sequencing Quality", "Library Quality", "Alignment Categories", "Reads and Molecules",
+             "Cells"]
+
+# used genome annotation
+annot: "/g/steinmetz/project/otar_2063/references/hg38.gtf"
+
+# pattern to identify gRNAs in processed gene expression data
+grna_pattern: "GUIDE-"
+
+# sceptre analysis parameters
+sceptre:
+  moi: "high"
+  side: "both"
+  resampling_mechanism: "permutations"
+  formula: "~log(response_n_umis) + log(response_n_nonzero) + log(grna_n_umis + 1) + log(grna_n_nonzero + 1) + chip + panel"
+
+# QC filtered combined seurat object
+filtered_seurat: "/g/steinmetz/project/otar_2063/promoter_screen/interpretation/seurat_qc/output/combined/Seurat_merged_QC_2025-08-04.rds"
+
+# samples per donor
+samples_per_donor:
+  A: ["A3", "A6"]
+  B: ["B2", "B5", "B8"]
+  C: ["C1", "C4", "C7"]
