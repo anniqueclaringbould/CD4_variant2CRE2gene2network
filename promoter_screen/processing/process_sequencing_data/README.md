@@ -4,7 +4,8 @@ This snakemake workflow aligns promoter screen sequencing data to the a customiz
 the human genome and used gRNA sequences, and extracts gene and gRNA UMI counts for each cell using
 the BD Rhapsody Sequence Analysis Pipeline.
 
-Running this workflow requires the (BD Rhapsody Sequence Analysis Pipeline)[ https://www.bdbiosciences.com/en-us/products/software/rhapsody-sequence-analysis-pipeline] is
+Running this workflow requires the
+[BD Rhapsody Sequence Analysis Pipeline](https://www.bdbiosciences.com/en-us/products/software/rhapsody-sequence-analysis-pipeline) is
 installed and available via the systems path. The workflow was used with version 2.2 of the BD
 Rhapsody pipeline.
 

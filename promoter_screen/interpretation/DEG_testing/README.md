@@ -20,4 +20,15 @@ This folder contains scripts and notebooks for preprocessing, pseudobulk constru
 - **04_01_Weinstock_comparison.ipynb**: Compares experimental DEGs to Weinstock et al. reference and SCEPTRE results, generating comparison plots/tables.
 - **utils.py**: Utility functions for normalization, preprocessing, plotting, and DEG result loading.
 
+## Additional differential gene expression methods
+
+Code for additional differential gene expression testing methods explored in the manuscript can be 
+found in `Additional_DEG_methods`:
+
+#### SCEPTRE
+Scripts to run model calibration checks and the full differential expression analysis using the 
+SCEPTRE Nextflow pipeline. Because of the high number of tests, running the pipeline using
+large-scale parallization, for instance on a HPC cluster with Slurm as executor, is required. See
+the [SCEPTRE Nextflow pipeline](https://timothy-barry.github.io/sceptre-book/at-scale.html) and [Nextflow](https://www.nextflow.io/docs/latest/) documentations for more information.
+
 ---
