@@ -98,9 +98,8 @@ all_tested_genes = sorted(gene_panel, key=lambda g: (gene_panel[g], g))
 enh_target_genes = set(enh["response_id"].unique())
 print(f"  Tested genes: {len(all_tested_genes)}, with enhancer hits: {len(enh_target_genes)}")
 
-# ── Perturb-seq ──────────────────────────────────────────────────────────────
-print("Loading Perturb-seq hits...")
-ps = pd.read_csv(INPUT_DIR / "perturbseq_hits_nolfc.csv")
+ps = pd.read_excel("/g/stegle/schrod/code/TCell/Table S12.xlsx")
+ps.rename(columns={"KO": "contrast", "gene_name": "variable", "adj_pval": "adj_p_value", "LFC": "log_fc"}, inplace=True)
 ps = ps[ps["contrast"] != ps["variable"]]                          # no self
 ps = ps[ps["log_fc"].abs() >= LFC_CUTOFF]                          # LFC gate
 ps = ps[ps["contrast"].isin(var_gene_set) & ps["variable"].isin(var_gene_set)]  # both var
