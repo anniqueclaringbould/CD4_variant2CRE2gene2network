@@ -1,0 +1,2754 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+#library(scMAGeCK)
+library(biomaRt)
+library(ComplexHeatmap)
+library(circlize)
+library(tidyverse)
+library(data.table)
+library(Seurat)
+library(optparse)
+library(ggplot2)
+library(ggrepel)
+library(viridis)
+#library(qs)
+library(gridExtra)
+library(Rcpp)
+library(scDblFinder)
+library(ggrastr)
+library(Matrix)
+library(tibble)
+library(dplyr)
+library(RColorBrewer)
+library(ggpubr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(rtracklayer)
+library(igraph)
+```
+
+```{r}
+select <- dplyr::select
+rename <- dplyr::rename
+slice <- dplyr::slice
+map <- purrr::map
+mutate <- dplyr::mutate
+filter<-dplyr::filter
+
+source("/g/steinmetz/moonen/Rstudio/theme_manuscript_default.R")
+
+
+#dir <- "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/"
+#indir <- paste0(dir, "output")
+outdir <- paste0("/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results")
+
+## load result files
+results_path <- "/g/steinmetz/moonen/Rstudio/screen_analyses_DM/results"
+
+# Get the list of all folders named Panel1 to Panel16
+panel_folders <- list.files(results_path, pattern = "Panel[1-9]|Panel1[0-6]", full.names = TRUE, include.dirs = TRUE)
+
+# Function to read a discovery_results.tsv file from a given folder
+read_discovery_results <- function(folder) {
+  file_path <- file.path(folder, "discovery_results.tsv")
+  if (file.exists(file_path)) {
+    return(read.delim(file_path, header = TRUE, sep = "\t"))
+  } else {
+    return(NULL)
+  }
+}
+
+# Read all discovery_results.tsv files into a list
+discovery_results_list <- lapply(panel_folders, read_discovery_results)
+
+# Optionally, you can remove NULL entries if any folder does not contain the file
+discovery_results_list <- Filter(Negate(is.null), discovery_results_list)
+
+results_df <- bind_rows(discovery_results_list, .id = "panel")
+
+
+#load gene data
+genes <- read_tsv("/g/steinmetz/moonen/Rstudio/screen_analyses/resources/gene_tss.tsv", show_col_types = FALSE)
+# add gene TSS coordinates to results and derive enhancer coordinates from id
+results_df <- results_df %>% 
+  left_join(genes, by = "response_id") %>% 
+  rename(gene_chr = chr, gene_tss = position) %>% 
+  separate(grna_target, into = c("pert_chr", "pert_start", "pert_end"), sep = ":|-",
+           remove = FALSE, fill = "right", convert = TRUE) %>% 
+  mutate(pert_chr = if_else(is.na(pert_start), true = NA_character_, false = pert_chr))
+
+
+## load gRNA library details
+# Define the path to the folder containing the CSV files
+grna_lib_list <- list()
+grna_lib_list[[1]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_1_2023-12-22.csv')
+grna_lib_list[[2]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_2_2023-12-22.csv')
+grna_lib_list[[3]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_3_2023-12-22.csv')
+grna_lib_list[[4]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_4_2023-12-22.csv')
+grna_lib_list[[5]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_5_2023-12-22.csv')
+grna_lib_list[[6]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_6_2023-12-22.csv')
+grna_lib_list[[7]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_7_2023-12-22.csv')
+grna_lib_list[[8]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_8_2023-12-22.csv')
+grna_lib_list[[9]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_9_2023-12-22.csv')
+grna_lib_list[[10]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_10_2023-12-22.csv')
+grna_lib_list[[11]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_11_2023-12-22.csv')
+grna_lib_list[[12]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_12_2023-12-22.csv')
+grna_lib_list[[13]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_13_2023-12-22.csv')
+grna_lib_list[[14]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_14_2023-12-22.csv')
+grna_lib_list[[15]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_15_2023-12-22.csv')
+grna_lib_list[[16]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_16_2023-12-22.csv')
+
+grna_lib <- bind_rows(grna_lib_list)
+
+
+#load benedikt's GTF
+gtf <- readGFF("/g/steinmetz/brausche/genomes/alias/hg38/gencode_gtf/default/hg38.gtf")
+
+#keep gene name to ENSG conversion and gene location
+gtf <- gtf %>%
+  filter(type == "gene") %>%
+  select(gene_id, gene_name, seqid, start, end, strand) %>%
+  mutate(gene_id = sub("\\..*$", "", gene_id)) %>%
+  distinct() 
+
+
+targets <- grna_lib %>% 
+  select(peak = peak, target_gene = target_gene) %>%
+  unique()
+
+#Separate the target_gene column into individual rows
+targets <- targets %>%
+  separate_rows(target_gene, sep = ";")
+
+#Join with the gtf dataframe to map ENSG IDs to gene_name
+# Assuming gtf has been loaded with only the relevant columns (gene_id and gene_name)
+targets <- targets%>%
+  left_join(gtf[, c("gene_id", "gene_name")], by = c("target_gene" = "gene_id"))
+
+targets <- targets %>%
+  group_by(peak) %>%
+  summarise(target_genes = paste(unique(gene_name), collapse = ";"), .groups = "drop")
+
+#combine all results into one data frame
+#results_df <- do.call(rbind, discovery_results_list)
+
+# Add ENSG IDs and gene locations to the results_df
+results_df <- results_df %>%
+  left_join(gtf, by = c("response_id" = "gene_name"))
+
+results_df <- results_df %>%
+  left_join(targets, by = c("grna_target" = "peak")) %>%
+  mutate(target_genes = ifelse(is.na(target_genes), grna_target, target_genes))
+
+results_df <- results_df %>%
+  mutate(is_target = sapply(1:n(), function(i) {
+    target_list <- unlist(strsplit(target_genes[i], ";"))
+    response_id[i] %in% target_list
+  }))
+
+results_df <- results_df %>%
+  rename(gene_start = start, gene_end = end)
+
+
+# Extract enhancer chromosome, start, and end positions from grna_target
+results_df <- results_df %>%
+  mutate(enh_chr = ifelse(grepl("chr", grna_target), sub(":.*", "", grna_target), NA),
+         enh_start = ifelse(grepl("chr", grna_target), as.numeric(sub(".*:(\\d+)-.*", "\\1", grna_target)), NA),
+         enh_end = ifelse(grepl("chr", grna_target), as.numeric(sub(".*-(\\d+)", "\\1", grna_target)), NA))
+
+# Add shortest distance between enhancer and gene, when any overlap -> 0. Independent of strand.
+results_df <- results_df %>%
+  mutate(distance = case_when(
+    !is.na(enh_end) & enh_end < gene_start & enh_chr == gene_chr ~ enh_end - gene_start,   # Enhancer is before gene
+    !is.na(enh_start) & enh_start > gene_end & enh_chr == gene_chr ~ enh_start - gene_end, # Enhancer is after gene
+    !is.na(enh_start) & !is.na(enh_end) & enh_start <= gene_end & enh_end >= gene_start & enh_chr == gene_chr ~ 0, # Overlap
+    TRUE ~ NA_real_  # If enh_chr is NA or other cases
+  ))
+    
+  
+
+results_df <- results_df %>%
+  # Add TSS_position based on the strand: gene_start for positive strand, gene_end for negative strand
+  mutate(TSS_position = ifelse(strand == "+", gene_start, gene_end)) %>%
+ # Calculate TSS distance (midpoint of enhancer to TSS) based on the strand
+  mutate(TSS_dist = if_else(
+    enh_chr == gene_chr,
+    true = (enh_start + enh_end) / 2 - TSS_position,  # Calculate distance from TSS
+    false = NA_real_  # In case chromosomes don't match
+  ))
+
+# Drop the intermediate enh_center column (if not needed)
+#results_df <- results_df %>%
+#  select(-enh_center)
+
+results_df<-results_df%>% 
+  mutate(pval_scaled = -log10(p_value + 1e-15))
+
+write.csv(results_df, paste0(outdir, "/results_df_new_dist_improved.csv"), row.names = FALSE)
+
+```
+
+```{r}
+
+##plot distance against effect size
+
+results_df <- read_csv("/g/steinmetz/moonen/Rstudio/screen_analyses_DM/results/results_df_annotated.csv")
+results_df <- read_csv("/g/steinmetz/gschwind/otar/manuscript_analyses/results/results_df_with_promoterC_annotated.csv")
+symlog_trans <- function() {
+   trans <- function(x) sign(x) * log1p(abs(x))
+   inv <- function(x) sign(x) * (exp(abs(x)) - 1)
+   scales::trans_new(name = 'symlog', transform = trans, inverse = inv)
+ }
+ 
+ symlog_breaks <- function(limits) {
+   breaks <- unique(c(-rev(10^seq(0, log10(abs(limits[1])), length.out = 5)),
+                      0,
+                      10^seq(0, log10(abs(limits[2])), length.out = 5)))
+   breaks
+ }
+ custom_breaks <- c(-500000, -100000, -50000, -10000, -5000, -1000, -500, -100, -50, -10, 0, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000)
+ 
+expr_change_dist <- ggplot(results_df %>% filter(significant==TRUE, ctrl_perturbation==FALSE) %>% filter(pert_chr == gene_chr), aes(x = (dist_to_gene / 1000), y = log_2_fold_change, color = as.factor(gene_chr), shape = is_target)) +
+   geom_point(alpha = 0.5, fill = NA, stroke = 1) +
+   scale_color_discrete(name = "Chromosome") +  # Automatically generate colors for chromosomes
+   scale_size_continuous(range = c(0.075, 3), guide = guide_legend(title = "1/(p-value)")) +
+   scale_shape_manual(name = "Predicted target", values = c("TRUE" = 16, "FALSE" = 21), labels = c("Yes" = "TRUE", "No" = "FALSE")) +
+  scale_x_continuous(trans = symlog_trans(), breaks = custom_breaks, name = "Distance to gene (kb, symlog scale)") +
+   labs(
+     title = "Distance to TSS or gene end vs. Expression Change",
+     y = "Expression change (log2FC)",
+     x = "Distance to TSS (kb)" ) +
+   #xlim(-1000, 1000)+
+   theme_minimal() +
+   theme(
+     legend.position = "right",
+     legend.title.align = 0.5,
+     plot.title = element_text(hjust = 0.5),
+     plot.subtitle = element_text(hjust = 0.5),
+     axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+   ) +
+ geom_vline(xintercept = c(-1.5, 1.5), linetype = "dotted", color = "red", size = 1) +
+ geom_vline(xintercept = c(-10, 10), linetype = "dotted", color = "grey", size = 1)
+
+
+ pdf(paste0(outdir, "/distance_gene_expr_change_all_panels.pdf"), height = 6, width = 12)
+ expr_change_dist
+ dev.off()
+ 
+ 
+ expr_change_dist_TSS <- ggplot(results_df %>% filter(significant==TRUE, ctrl_perturbation==FALSE) %>% filter(pert_chr == gene_chr), aes(x = (dist_to_tss / 1000), y = log_2_fold_change, color = as.factor(gene_chr), shape = is_target)) +
+   geom_point(alpha = 0.5, fill = NA, stroke = 1) +
+   scale_color_discrete(name = "Chromosome") +  # Automatically generate colors for chromosomes
+   scale_size_continuous(range = c(0.075, 3), guide = guide_legend(title = "1/(p-value)")) +
+   scale_shape_manual(name = "Predicted target", values = c("TRUE" = 16, "FALSE" = 21), labels = c("Yes" = "TRUE", "No" = "FALSE")) +
+  scale_x_continuous(trans = symlog_trans(), breaks = custom_breaks, name = "Distance to TSS (kb, symlog scale)") +
+   labs(
+     title = "Distance to TSS vs. Expression Change",
+     y = "Expression change (log2FC)",
+     x = "Distance to TSS (kb)" ) +
+   #xlim(-1000, 1000)+
+   theme_minimal() +
+   theme(
+     legend.position = "right",
+     legend.title.align = 0.5,
+     plot.title = element_text(hjust = 0.5),
+     plot.subtitle = element_text(hjust = 0.5),
+     axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+   ) +
+ geom_vline(xintercept = c(-1.5, 1.5), linetype = "dotted", color = "red", size = 1) +
+ geom_vline(xintercept = c(-10, 10), linetype = "dotted", color = "grey", size = 1)
+
+
+ pdf(paste0(outdir, "/TSS_distance_gene_expr_change_all_panels.pdf"), height = 6, width = 12)
+ expr_change_dist_TSS
+ dev.off()
+
+```
+
+same plots but coloured by p-value
+
+```{r}
+expr_change_dist_p <- ggplot(results_df %>% filter(significant == TRUE, ctrl_perturbation==FALSE) %>% filter(enh_chr == gene_chr), 
+                           aes(x = (dist_to_gene / 1000), y = log_2_fold_change, color = pval_scaled, shape = is_target)) +
+  geom_point(alpha = 0.5, fill = NA, stroke = 1) +
+  scale_color_gradient(name = "-log10(p-value + 1e-15)", low = "blue", high = "red") +  # Gradient from low to high p-value
+  scale_shape_manual(name = "Predicted target", values = c("TRUE" = 16, "FALSE" = 21), labels = c("Yes" = "TRUE", "No" = "FALSE")) +
+  scale_x_continuous(trans = symlog_trans(), breaks = custom_breaks, name = "Distance to gene (kb, symlog scale)") +
+  labs(
+    title = "Distance to TSS or gene end vs. Expression Change",
+    y = "Expression change (log2FC)",
+    x = "Distance to TSS (kb)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title.align = 0.5,
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+  ) +
+  geom_vline(xintercept = c(-1.5, 1.5), linetype = "dotted", color = "red", size = 1) +
+  geom_vline(xintercept = c(-10, 10), linetype = "dotted", color = "grey", size = 1)
+
+pdf(paste0(outdir, "/distance_gene_expr_change_all_panels_pvalue.pdf"), height = 6, width = 12)
+expr_change_dist_p
+dev.off()
+
+
+## with TSS distance
+
+expr_change_dist_TSS_p <- ggplot(results_df %>% filter(significant == TRUE, ctrl_perturbation==FALSE) %>% filter(enh_chr == gene_chr), 
+                               aes(x = (dist_to_tss / 1000), y = log_2_fold_change, color = pval_scaled, shape = is_target)) +
+  geom_point(alpha = 0.5, fill = NA, stroke = 1) +
+  scale_color_gradient(name = "-log10(p-value + 1e-15)", low = "blue", high = "red") +  # Gradient for p-value coloring
+  scale_shape_manual(name = "Predicted target", values = c("TRUE" = 16, "FALSE" = 21), labels = c("Yes" = "TRUE", "No" = "FALSE")) +
+  scale_x_continuous(trans = symlog_trans(), breaks = custom_breaks, name = "Distance to TSS (kb, symlog scale)") +
+  labs(
+    title = "Distance to TSS vs. Expression Change",
+    y = "Expression change (log2FC)",
+    x = "Distance to TSS (kb)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title.align = 0.5,
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+  ) +
+  geom_vline(xintercept = c(-1.5, 1.5), linetype = "dotted", color = "red", size = 1) +
+  geom_vline(xintercept = c(-10, 10), linetype = "dotted", color = "grey", size = 1)
+
+pdf(paste0(outdir, "/TSS_distance_gene_expr_change_all_panels_pvalue.pdf"), height = 6, width = 12)
+expr_change_dist_TSS_p
+dev.off()
+```
+with catagorization by interaction type
+```{r}
+## with TSS distance
+
+distinct_cre_colors <- c(
+  "distal" = "#daa520",            # Blue for Distinct CREs
+  "target_gene_promoter" = "#6ebff5",  # Orange
+  "target_gene_body" = "#4299d4",
+  "indirect" = "#0263a3",
+  "trans"= "#9ad8fc"
+)
+
+expr_change_dist_TSS_p <- ggplot(results_df %>% filter(significant == TRUE, ctrl_perturbation==FALSE), 
+                               aes(x = (dist_to_tss / 1000), y = log_2_fold_change, color = as.factor(interaction_type), shape = is_target)) +
+  geom_point(alpha = 0.5, fill = NA, stroke = 1) +
+  scale_color_manual(name = "Interaction type", values = distinct_cre_colors) +  # Gradient for p-value coloring
+  scale_shape_manual(name = "Predicted target", values = c("TRUE" = 16, "FALSE" = 21), labels = c("Yes" = "TRUE", "No" = "FALSE")) +
+  scale_x_continuous(trans = symlog_trans(), breaks = custom_breaks, name = "Distance to TSS (kb, symlog scale)") +
+  labs(
+    title = "Distance to TSS vs. Expression Change",
+    y = "Expression change (log2FC)",
+    x = "Distance to TSS (kb)"
+  ) +
+  theme_minimal() +
+  theme_manuscript_default()+
+  #   legend.position = "right",
+  #   legend.title.align = 0.5,
+  #   plot.title = element_text(hjust = 0.5),
+  #   plot.subtitle = element_text(hjust = 0.5),
+  #   axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+  # ) +
+  geom_vline(xintercept = c(-1.5, 1.5), linetype = "dotted", color = "grey", size = 1) +
+  #geom_vline(xintercept = c(-10, 10), linetype = "dotted", color = "grey", size = 1)
+
+pdf(paste0(outdir, "/241031_TSS_distance_gene_expr_change_all_panels_interaction_type.pdf"), height = 6, width = 12)
+expr_change_dist_TSS_p
+dev.off()
+```
+
+
+
+```{r}
+## Vulcanoplot
+
+####vulcano plot
+
+results_df<-results_df%>% 
+  mutate(pval_scaled = -log10(p_value + 1e-15))
+ 
+# Generate the volcano plot
+vulcano <- ggplot(results_df %>% filter(enh_chr == gene_chr), aes(x = log_2_fold_change, y = pval_scaled)) +
+  geom_point(aes(
+    fill = significant, 
+    color = ifelse(is_target, "TRUE", "FALSE")
+  ), shape = 21, size = 2.5, stroke = 0.5) +
+  scale_fill_manual(
+    values = c('FALSE' = '#dddddd', 'TRUE' = '#4285f4'), 
+    name = "Significant"
+  ) +
+  scale_color_manual(
+    values = c('TRUE' = 'red', 'FALSE' = NA),
+    name = "Predicted Target",
+    labels = c('FALSE', 'TRUE')
+  ) +
+  labs(
+    x = "Log fold change",
+    y = "-log(p-value)",
+    title = "Volcano Plot"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+pdf(paste0(outdir, "/Vulcano.pdf"), height = 6, width = 12)
+ vulcano
+ dev.off()
+
+
+```
+
+```{r}
+## comparing scmageck and SCEPTRE. taking along only the overlapping results
+
+#load scmageck results
+scmageck<- readRDS("/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/results/scmageck_all_panels.rds")
+
+scmageck <- scmageck %>% mutate(significant = padj <= 0.001)
+scmageck <- scmageck%>% mutate(pval_scaled = -log10(padj + 1e-15))
+
+scmageck_significant <- scmageck %>% filter(significant == TRUE, grepl("^chr", guide_target))
+results_df_significant <- results_df %>% filter(significant == TRUE, grepl("^chr", grna_target))
+
+
+scmageck_set <- scmageck_significant %>% 
+  select(guide_target, gene) %>% 
+  unite("key", guide_target, gene, sep = "_")
+
+results_df_set <- results_df_significant %>% 
+  select(grna_target, response_id) %>% 
+  unite("key", `grna_target`, response_id, sep = "_")
+
+scmageck_significant <- scmageck_significant %>%
+  mutate(key = paste(guide_target, gene, sep = "_"))
+
+results_df_significant <- results_df_significant %>%
+  mutate(key = paste(grna_target, response_id, sep = "_"))
+
+
+# Step 3: Find the unique keys in each set
+scmageck_keys <- unique(scmageck_set$key)
+results_df_keys <- unique(results_df_set$key)
+
+# Step 4: Create the Venn diagram
+venn_data <- list(Scmageck = scmageck_keys, Results_df = results_df_keys)
+
+venn.plot <- venn.diagram(
+  x = venn_data,
+  category.names = c("Scmageck", "Sceptre"),
+  filename = NULL,  # Not saving to file, but rendering in the plot window
+  output = TRUE
+)
+
+# Display the Venn diagram using grid.draw
+grid.newpage()
+grid.draw(venn.plot)
+
+
+
+### find the overlap and create correlation plot
+
+overlap_keys <- intersect(scmageck_set$key, results_df_set$key)
+
+# Step 4: Merge the datasets based on overlapping keys
+scmageck_overlap <- scmageck_significant %>%
+  filter(key %in% overlap_keys)
+
+results_df_overlap <- results_df_significant %>%
+  filter(key %in% overlap_keys)
+
+merged_df <- merge(scmageck_overlap, results_df_overlap, by = "key", suffixes = c("_scmageck", "_sceptre"))
+
+# Step 5: Create correlation plots for pval and expression_change
+# Pval correlation plot
+pval_plot <- ggplot(merged_df, aes(x = pval_scaled_scmageck, y = pval_scaled_sceptre)) +
+  geom_point() +
+  geom_smooth(method = "lm", col = "blue") +
+  labs(title = "Correlation of P-values", x = "scmageck P-value", y = "sceptre P-value") +
+  theme_minimal()
+
+
+# Expression change correlation plot
+expr_change_plot <- ggplot(merged_df, aes(x = expr_change, y = log_2_fold_change)) +
+  geom_point() +
+    geom_smooth(method = "lm", formula = y ~ x + 0, col = "blue") +  # Force the line through zero
+  stat_cor(aes(label = paste(..r.label.., ..rr.label.., sep = "~`,`~")), method = "pearson", label.x = 0) +
+  labs(title = "Correlation of Expression Change",
+       x = "Scmageck Expression Change",
+       y = "Sceptre Expression Change") +
+  theme_minimal()
+
+expr_change_plot <- ggplot(merged_df, aes(x = expr_change, y = log_2_fold_change)) +
+  geom_point() +
+  geom_smooth(method = "lm", col = "blue") +
+   stat_cor(aes(label = paste(..r.label.., ..rr.label.., sep = "~`,`~")), method = "pearson", label.x = 0) +
+  labs(title = "Correlation of Expression Change", x = "Scmageck Expression Change", y = "Sceptre Expression Change") +
+  theme_minimal()
+
+# Display the plots
+print(pval_plot)
+print(expr_change_plot)
+
+
+pdf(paste0(outdir, "/sceptre_scmageck_correlation.pdf"), height = 6, width = 12)
+grid.draw(venn.plot)
+pval_plot
+expr_change_plot
+ dev.off()
+
+```
+
+
+```{r}
+#let's look at some gene enrichments?
+
+#load peak data with snps and traits
+peaks <- read_tsv("/g/steinmetz/project/otar/select_enhancer_peaks/Final_peaks_large_screen_2024-03-01.tsv", show_col_types = FALSE)
+snps <- read_tsv("/g/steinmetz/project/otar/select_enhancer_peaks/Unique_peaks_for_all_traits_combined_2024-03-01.tsv", show_col_types = FALSE)
+
+allergic_disease <- peaks %>% filter(trait == "Allergic_disease")
+Ankylosing_spondylitis <-peaks %>% filter(trait == "Ankylosing_spondylitis")
+Asthma <- peaks %>% filter(trait == "Asthma")
+Crohns_disease <-  peaks %>% filter(trait == "Crohns_disease")
+Celiac_disease <-  peaks %>% filter(trait == "Celiac_disease")
+Eczema <-  peaks %>% filter(trait == "Eczema")
+Inflammatory_bowel_disease <-  peaks %>% filter(trait == "Inflammatory_bowel_disease")
+Multiple_sclerosis <-  peaks %>% filter(trait == "Multiple_sclerosis")
+Primary_biliary_cholangitis <-  peaks %>% filter(trait == "Primary_biliary_cholangitis")
+Primary_biliary_cirrhosis <-peaks %>% filter(trait == "Primary_biliary_cirrhosis")
+Primary_sclerosing_cholangitis <-peaks %>% filter(trait == "Primary_sclerosing_cholangitis")
+Psoriasis <-peaks %>% filter(trait == "Psoriasis")
+Rheumatoid_arthritis <-peaks %>% filter(trait == "Rheumatoid_arthritis")
+Systemic_lupus_erythematosus <-peaks %>% filter(trait == "Systemic_lupus_erythematosus")
+Type_1_diabetes <-peaks %>% filter(trait == "Type_1_diabetes")
+Ulcerative_colitis <-peaks %>% filter(trait == "Ulcerative_colitis")
+Gout <-peaks %>% filter(trait == "Gout")
+# 
+# # #selecting all significant
+# results_df_significant <- results_df%>% filter(significant==TRUE)
+# results_df_AD <- results_df %>%  filter(grna_target %in% allergic_disease$peak) %>% filter(significant==TRUE)
+# results_df_AS <- results_df %>%  filter(grna_target %in% Ankylosing_spondylitis$peak) %>% filter(significant==TRUE)
+# results_df_Ast <- results_df %>%  filter(grna_target %in% Asthma$peak) %>% filter(significant==TRUE)
+# results_df_CeD <- results_df %>%  filter(grna_target %in% Celiac_disease$peak) %>% filter(significant==TRUE)
+# results_df_CD <- results_df %>%  filter(grna_target %in% Crohns_disease$peak) %>% filter(significant==TRUE)
+# results_df_Ecz <- results_df %>%  filter(grna_target %in% Eczema$peak) %>% filter(significant==TRUE)
+# results_df_IBD <- results_df %>%  filter(grna_target %in% Inflammatory_bowel_disease$peak) %>% filter(significant==TRUE)
+# results_df_MS <- results_df %>%  filter(grna_target %in% Multiple_sclerosis$peak) %>% filter(significant==TRUE)
+# results_df_PBCh <- results_df %>%  filter(grna_target %in% Primary_biliary_cholangitis$peak) %>% filter(significant==TRUE)
+# results_df_PBC <- results_df %>%  filter(grna_target %in% Primary_biliary_cirrhosis$peak) %>% filter(significant==TRUE)
+# results_df_PSC <- results_df %>%  filter(grna_target %in% Primary_sclerosing_cholangitis$peak) %>% filter(significant==TRUE)
+# results_df_Psor <- results_df %>%  filter(grna_target %in% Psoriasis$peak) %>% filter(significant==TRUE)
+# results_df_RA <- results_df %>%  filter(grna_target %in% Rheumatoid_arthritis$peak) %>% filter(significant==TRUE)
+# results_df_SLE <- results_df %>%  filter(grna_target %in% Systemic_lupus_erythematosus$peak) %>% filter(significant==TRUE)
+# results_df_T1D <- results_df %>%  filter(grna_target %in% Type_1_diabetes$peak) %>% filter(significant==TRUE)
+# results_df_UC <- results_df %>%  filter(grna_target %in% Ulcerative_colitis$peak) %>% filter(significant==TRUE)
+# results_df_Gout <- results_df %>%  filter(grna_target %in% Gout$peak) %>% filter(significant==TRUE)
+
+# # selecting all significant, but not in gene TSS or gene body
+# results_df_significant <- results_df%>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_AD <- results_df %>%  filter(grna_target %in% allergic_disease$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_AS <- results_df %>%  filter(grna_target %in% Ankylosing_spondylitis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_Ast <- results_df %>%  filter(grna_target %in% Asthma$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_CeD <- results_df %>%  filter(grna_target %in% Celiac_disease$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_CD <- results_df %>%  filter(grna_target %in% Crohns_disease$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_Ecz <- results_df %>%  filter(grna_target %in% Eczema$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_IBD <- results_df %>%  filter(grna_target %in% Inflammatory_bowel_disease$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_MS <- results_df %>%  filter(grna_target %in% Multiple_sclerosis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_PBCh <- results_df %>%  filter(grna_target %in% Primary_biliary_cholangitis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_PBC <- results_df %>%  filter(grna_target %in% Primary_biliary_cirrhosis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_PSC <- results_df %>%  filter(grna_target %in% Primary_sclerosing_cholangitis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_Psor <- results_df %>%  filter(grna_target %in% Psoriasis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_RA <- results_df %>%  filter(grna_target %in% Rheumatoid_arthritis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_SLE <- results_df %>%  filter(grna_target %in% Systemic_lupus_erythematosus$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_T1D <- results_df %>%  filter(grna_target %in% Type_1_diabetes$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_UC <- results_df %>%  filter(grna_target %in% Ulcerative_colitis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+# results_df_Gout <- results_df %>%  filter(grna_target %in% Gout$peak) %>% filter(significant==TRUE) %>% filter(interaction_type!="target_gene_promoter", interaction_type!="target_gene_body")
+
+#selecting all distal significant
+results_df_significant <- results_df%>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_AD <- results_df %>%  filter(grna_target %in% allergic_disease$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_AS <- results_df %>%  filter(grna_target %in% Ankylosing_spondylitis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_Ast <- results_df %>%  filter(grna_target %in% Asthma$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_CeD <- results_df %>%  filter(grna_target %in% Celiac_disease$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_CD <- results_df %>%  filter(grna_target %in% Crohns_disease$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_Ecz <- results_df %>%  filter(grna_target %in% Eczema$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_IBD <- results_df %>%  filter(grna_target %in% Inflammatory_bowel_disease$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_MS <- results_df %>%  filter(grna_target %in% Multiple_sclerosis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_PBCh <- results_df %>%  filter(grna_target %in% Primary_biliary_cholangitis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_PBC <- results_df %>%  filter(grna_target %in% Primary_biliary_cirrhosis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_PSC <- results_df %>%  filter(grna_target %in% Primary_sclerosing_cholangitis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_Psor <- results_df %>%  filter(grna_target %in% Psoriasis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_RA <- results_df %>%  filter(grna_target %in% Rheumatoid_arthritis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_SLE <- results_df %>%  filter(grna_target %in% Systemic_lupus_erythematosus$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_T1D <- results_df %>%  filter(grna_target %in% Type_1_diabetes$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_UC <- results_df %>%  filter(grna_target %in% Ulcerative_colitis$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+results_df_Gout <- results_df %>%  filter(grna_target %in% Gout$peak) %>% filter(significant==TRUE) %>% filter(interaction_type=="distal")
+
+gene_list_all<- results_df %>% distinct(gene_id) 
+gene_list_sig <- results_df_significant %>% distinct(gene_id) 
+gene_list_AD <- results_df_AD %>% distinct(gene_id) 
+gene_list_AS <- results_df_AS %>% distinct(gene_id) 
+gene_list_Ast <- results_df_Ast %>% distinct(gene_id) 
+gene_list_CeD <- results_df_CeD %>% distinct(gene_id) 
+gene_list_CD <- results_df_CD %>% distinct(gene_id) 
+gene_list_Ecz <- results_df_Ecz %>% distinct(gene_id) 
+gene_list_IBD <- results_df_IBD %>% distinct(gene_id) 
+gene_list_MS <- results_df_MS %>% distinct(gene_id) 
+gene_list_PBCh <- results_df_PBCh %>% distinct(gene_id) 
+gene_list_PBC <- results_df_PBC %>% distinct(gene_id) 
+gene_list_PSC <- results_df_PSC %>% distinct(gene_id) 
+gene_list_Psor <- results_df_Psor %>% distinct(gene_id) 
+gene_list_RA <- results_df_RA %>% distinct(gene_id) 
+gene_list_SLE <- results_df_SLE %>% distinct(gene_id) 
+gene_list_T1D <- results_df_T1D %>% distinct(gene_id) 
+gene_list_UC <- results_df_UC %>% distinct(gene_id) 
+gene_list_Gout <- results_df_Gout %>% distinct(gene_id) 
+
+#for the disease that are the same
+gene_list_IBD_UC_CD <- bind_rows(gene_list_IBD, gene_list_UC, gene_list_CD) %>% unique()
+gene_list_PBCh_PBC <- bind_rows(gene_list_PBCh, gene_list_PBC) %>% unique()
+
+#for disease groups
+gene_list_skin_allergic <-bind_rows(gene_list_AD, gene_list_Ast, gene_list_Ecz, gene_list_Psor) %>% unique()
+gene_list_gastrointestinal <-bind_rows(gene_list_IBD_UC_CD, gene_list_CeD) %>% unique()
+gene_list_rheumatic <-bind_rows(gene_list_AS, gene_list_RA, gene_list_SLE, gene_list_MS, gene_list_Gout) %>% unique()
+gene_list_hepatic <- bind_rows(gene_list_PBCh_PBC, gene_list_PSC) %>% unique()
+
+```
+
+
+```{r}
+
+gene_lists <- list(
+  significant = gene_list_sig$gene_id,
+  AD = gene_list_AD$gene_id,
+  AS = gene_list_AS$gene_id,
+  Ast = gene_list_Ast$gene_id,
+  CeD = gene_list_CeD$gene_id,
+  CD = gene_list_CD$gene_id,
+  Ecz = gene_list_Ecz$gene_id,
+  IBD = gene_list_IBD$gene_id,
+  MS = gene_list_MS$gene_id,
+  PBCh = gene_list_PBCh$gene_id,
+  PBC = gene_list_PBC$gene_id,
+  PSC = gene_list_PSC$gene_id,
+  Psor = gene_list_Psor$gene_id,
+  RA = gene_list_RA$gene_id,
+  SLE = gene_list_SLE$gene_id,
+  T1D = gene_list_T1D$gene_id,
+  UC = gene_list_UC$gene_id,
+  Gout = gene_list_Gout$gene_id,
+  IBD_UC_CD = gene_list_IBD_UC_CD$gene_id,
+  PBCh_PBC = gene_list_PBCh_PBC$gene_id,
+  skin_allergic = gene_list_skin_allergic$gene_id,
+  gastrointestinal = gene_list_gastrointestinal$gene_id,
+  rheumatic = gene_list_rheumatic$gene_id,
+  hepatic = gene_list_hepatic$gene_id
+)
+
+# Lists to store all enrichment results for inspection
+all_go_enrichment_results <- list()
+all_kegg_enrichment_results <- list()
+
+# Collect all p.adjust values for GO and KEGG to calculate global min and max
+all_p_adjust_GO <- c()
+all_p_adjust_KEGG <- c()
+
+# Loop over each gene list to collect p.adjust values and store enrichment data
+for (list_name in names(gene_lists)) {
+  gene_list <- gene_lists[[list_name]]
+  
+  # GO enrichment
+  go_enrichment <- enrichGO(
+    gene         = gene_lists,
+    OrgDb        = org.Hs.eg.db,
+    ont          = "BP",
+    pAdjustMethod = "BH",
+    universe     = gene_list_all$gene_id,
+    pvalueCutoff  = 0.05,
+    qvalueCutoff  = 0.05,
+    keyType       = 'ENSEMBL',
+    readable      = TRUE
+  )
+  # Store the result for GO enrichment and append p.adjust values if they exist
+  if (!is.null(go_enrichment) && "p.adjust" %in% colnames(as.data.frame(go_enrichment))) {
+    all_go_enrichment_results[[list_name]] <- go_enrichment
+    all_p_adjust_GO <- c(all_p_adjust_GO, go_enrichment$p.adjust)
+  }  
+  
+  # KEGG enrichment
+  gene_list_entrez <- bitr(gene_list, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  gene_list_all_entrez <- bitr(gene_list_all$gene_id, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  kegg_enrichment <- enrichKEGG(
+    gene         = gene_list_entrez$ENTREZID,
+    organism     = 'hsa',
+    pvalueCutoff = 0.05,
+    universe     = gene_list_all_entrez$ENTREZID,
+    keyType      = 'kegg'
+  )
+   # Store the result for KEGG enrichment and append p.adjust values if they exist
+  if (!is.null(kegg_enrichment) && "p.adjust" %in% colnames(as.data.frame(kegg_enrichment))) {
+    all_kegg_enrichment_results[[list_name]] <- kegg_enrichment
+    all_p_adjust_KEGG <- c(all_p_adjust_KEGG, kegg_enrichment$p.adjust)
+  }
+}
+
+# Calculate global min and max p.adjust values
+p_adjust_min_GO <- min(all_p_adjust_GO, na.rm = TRUE) -0.001
+p_adjust_max_GO <- max(all_p_adjust_GO, na.rm = TRUE) + 0.001
+
+p_adjust_min_KEGG <- min(all_p_adjust_KEGG, na.rm = TRUE)-0.001
+p_adjust_max_KEGG <- max(all_p_adjust_KEGG, na.rm = TRUE) + 0.001
+
+# Step 2: Use these values to create the plots
+
+# Function to perform GO enrichment and plot
+perform_GO_enrichment <- function(gene_list, list_name, p_adjust_min, p_adjust_max) {
+  go_enrichment <- enrichGO(
+    gene         = gene_list,
+    OrgDb        = org.Hs.eg.db,
+    ont          = "BP",
+    pAdjustMethod = "BH",
+    universe     = gene_list_all$gene_id,
+    pvalueCutoff  = 0.05,
+    qvalueCutoff  = 0.05,
+    keyType       = 'ENSEMBL',
+    readable      = TRUE
+  )
+
+  if (nrow(as.data.frame(go_enrichment)) > 0) {
+    plot <- dotplot(go_enrichment, showCategory = 10, title = paste("GO Enrichment -", list_name)) +
+      scale_color_gradient(low = "red", high = "blue", limits = c(p_adjust_min, p_adjust_max)) + theme_manuscript_default()
+    print(plot)  # Print to the PDF
+  } else {
+    message(paste0("No significant GO terms found for ", list_name))
+  }
+}
+
+# Save all GO plots in a single PDF
+pdf(paste0(outdir, "/GO_Enrichment_plots_241020.pdf"), height = 8, width = 10)
+
+# Loop over each gene list and perform GO enrichment analysis
+for (list_name in names(gene_lists)) {
+  gene_list <- gene_lists[[list_name]]
+  
+  perform_GO_enrichment(gene_list, list_name, p_adjust_min_GO, p_adjust_max_GO)
+}
+dev.off()
+
+
+# Function to perform KEGG enrichment and plot
+perform_KEGG_enrichment <- function(gene_list, list_name, p_adjust_min, p_adjust_max) {
+  gene_list_entrez <- bitr(gene_list, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  gene_list_all_entrez <- bitr(gene_list_all$gene_id, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+
+  kegg_enrichment <- enrichKEGG(
+    gene         = gene_list_entrez$ENTREZID,
+    organism     = 'hsa',
+    pvalueCutoff = 0.05,
+    universe     = gene_list_all_entrez$ENTREZID,
+    keyType      = 'kegg'
+  )
+
+  if (nrow(as.data.frame(kegg_enrichment)) > 0) {
+    plot <- dotplot(kegg_enrichment, showCategory = 10, title = paste("KEGG Enrichment -", list_name)) +
+      scale_color_gradient(low = "red", high = "blue", limits = c(p_adjust_min, p_adjust_max)) + theme_manuscript_default()
+    print(plot)  # Print to the PDF
+  } else {
+    message(paste0("No significant KEGG pathways found for ", list_name))
+  }
+}
+
+# Save all KEGG plots in a single PDF
+pdf(paste0(outdir, "/KEGG_Enrichment_plots_241020.pdf"), height = 8, width = 10)
+
+# Loop over each gene list and perform KEGG enrichment analysis
+for (list_name in names(gene_lists)) {
+  gene_list <- gene_lists[[]]
+  
+  perform_KEGG_enrichment(gene_list, list_name, p_adjust_min_KEGG, p_adjust_max_KEGG)
+}
+dev.off()
+
+##looking into single keggs or go's
+
+  go_enrichment <- enrichGO(
+    gene         = gene_list_IBD$gene_id,
+    OrgDb        = org.Hs.eg.db,
+    ont          = "BP",
+    pAdjustMethod = "BH",
+    universe     = gene_list_all$gene_id,
+    pvalueCutoff  = 0.05,
+    qvalueCutoff  = 0.05,
+    keyType       = 'ENSEMBL',
+    readable      = TRUE
+  )
+  
+  gene_list_entrez <- bitr(gene_list_Ast$gene_id, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  gene_list_all_entrez <- bitr(gene_list_all$gene_id, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+
+  kegg_enrichment_Ast <- enrichKEGG(
+    gene         = gene_list_entrez$ENTREZID,
+    organism     = 'hsa',
+    pvalueCutoff = 0.05,
+    universe     = gene_list_all_entrez$ENTREZID,
+    keyType      = 'kegg'
+  )
+  
+go_enrichment_df_IBD <- as.data.frame(go_enrichment)  # Convert the enrichResult object to a data frame
+  # Step 2: Filter for the specific pathway "negative regulation of T cell proliferation"
+pathway_name <- "interferon-gamma production"
+pathway_info <- go_enrichment_df[go_enrichment_df$Description == pathway_name, ]
+
+# Step 3: Extract and check genes involved in the pathway
+if (nrow(pathway_info) > 0) {
+  genes_in_pathway <- unlist(strsplit(pathway_info$geneID, "/"))
+  print(genes_in_pathway)  # List of genes involved in the selected pathway
+} else {
+  message("No enrichment in dataset.")
+}
+
+
+##single kegg
+ plot <- dotplot(kegg_enrichment_skin_allergic, showCategory = 10, title = paste("KEGG Enrichment -", "Skin_Allergic")) +
+      scale_color_gradient(low = "red", high = "blue", limits = c(p_adjust_min_KEGG, p_adjust_max_KEGG)) + xlim(0.2, 0.45) + theme_manuscript_default()
+plot  # Print to the PDF 
+  pdf(paste0(outdir, "/KEGG_Enrichment_skin_allergic.pdf"), height = 4, width = 4)
+  plot
+dev.off()
+  # Step 1: Access the enrichment result for RA (already in the object)
+kegg_enrichment_df <- as.data.frame(kegg_enrichment)  # Convert the enrichResult object to a data frame
+
+# Step 2: Filter for the specific pathway "negative regulation of T cell proliferation"
+pathway_name <- "natural killer cell activation"
+pathway_info <- kegg_enrichment_df[kegg_enrichment_df$Description == pathway_name, ]
+
+# Step 3: Extract and check genes involved in the pathway
+if (nrow(pathway_info) > 0) {
+  genes_in_pathway <- unlist(strsplit(pathway_info$geneID, "/"))
+  print(genes_in_pathway)  # List of genes involved in the selected pathway
+} else {
+  message("No enrichment in dataset.")
+}
+
+
+
+ensembl_genes <- gene_list_entrez %>%
+  filter(ENTREZID == "375387" | ENTREZID == "2615") %>%
+  select(ENSEMBL) %>%
+  pull()  # Extract the ENSMBL IDs as a vector
+
+# Step 2: Filter results_df_Ast based on the ENSEMBL gene IDs
+filtered_results <- results_df_Ast %>%
+  filter(gene_id %in% ensembl_genes)
+
+# Step 3: View the filtered results
+print(filtered_results)
+
+
+
+
+
+
+```
+
+
+getting a list for olink
+```{r}
+validation_list <- results_df %>% 
+  filter(significant==TRUE) %>% 
+  filter(distance >= 5000 | distance <= -5000) %>% 
+  filter(log_2_fold_change >= 0.7 | log_2_fold_change <= -0.7)
+
+unique(validation_list$response_id)
+
+write.csv(validation_list, paste0(outdir, "/validation_list.csv"), row.names = FALSE)
+
+```
+
+##### this is al random shit
+
+
+```{r}
+# # Define the specific grna_target values for setting ctrl_pert_prom to TRUE
+# ctrl_targets <- c("chr10:6062367-6062367", "chr11:2377310-2377310", 
+#                   "chr12:6789528-6789528", "chr2:203706639-203706639", 
+#                   "chr2:203867771-203867771")
+# 
+# # Create the new column in the full results_df dataframe
+# results_df <- results_df %>%
+#   mutate(ctrl_pert_prom = case_when(
+#     ctrl_perturbation == TRUE & grna_target %in% ctrl_targets ~ TRUE,
+#     TRUE ~ FALSE
+#   ))
+# # Define function to create unique CRE-gene links
+# results_df <- results_df %>%
+#   mutate(cre_gene_links = paste(grna_target, response_id, sep = "_"))  # Ensure unique CRE-gene pairs
+# 
+# # 1. Create in_design_data
+# in_design_data <- results_df %>%
+#   filter(ctrl_pert_prom==FALSE)%>%
+#   group_by(interaction_type = interaction_type) %>%
+#   summarise(
+#     CRE_gene_links = n_distinct(cre_gene_links),                      # Count of unique CRE-gene links in design
+#     Passed_QC = sum(pass_qc, na.rm = TRUE),                           # Count where QC passed
+#     Significant_CRE_links = sum(significant, na.rm = TRUE)            # Count of significant CRE-gene links (ignore NA)
+#   ) %>%
+#   ungroup()
+# 
+# distinct_cre_data <- results_df %>%
+#   filter(ctrl_pert_prom == FALSE) %>%
+#   group_by(interaction_type = interaction_type) %>%
+#   summarise(
+#     Distinct_CREs = n_distinct(grna_target),                          # Count of distinct CREs
+#     Passed_QC_Distinct = sum(pass_qc & !duplicated(grna_target), na.rm = TRUE), # Count distinct CREs that passed QC
+#     Significant_CRE_links = sum(pass_qc & significant  & !duplicated(grna_target), na.rm = TRUE)  # Count of significant distinct CRE-gene links with QC passed
+#   ) %>%
+#   ungroup()
+# 
+# # 3. Create interaction_data
+# interaction_data <- results_df %>%
+#   filter(ctrl_pert_prom==FALSE)%>%
+#   group_by(Interaction_Type = interaction_type) %>%
+#   summarise(
+#     Total_Distinct_CREs = n_distinct(grna_target),                    # Total distinct CREs
+#     Total_CRE_gene_links = n_distinct(cre_gene_links),                # Total CRE-gene links
+#     Significant_Distinct_CREs = sum(significant & !duplicated(grna_target), na.rm = TRUE),  # Significant distinct CREs (ignore NA)
+#     Significant_CRE_gene_links = sum(significant, na.rm = TRUE),      # Significant CRE-gene links (ignore NA)
+#     Passed_QC_CRE_gene_links = sum(pass_qc, na.rm = TRUE),            # Passed QC for CRE-gene links
+#     Passed_QC_Distinct_CREs = sum(pass_qc & !duplicated(grna_target), na.rm = TRUE) # Passed QC distinct CREs
+#   ) %>%
+#   ungroup()
+```
+
+Visualize the total hits per interaction type
+```{r}
+# Create your updated data frame for In Design CRE-gene links
+in_design_data <- data.frame(
+  InteractionType = c("distal", "Target gene promoter", "Target gene body", "trans", "indirect"),
+  CRE_gene_links = c(2723, 253, 527, 1, 1330),  # In Design (CRE-gene links)
+  Passed_QC = c(2292, 216, 476, 0, 1137),  # Passed QC
+  Significant_CRE_links = c(101, 163, 120, 0, 67)  # Significant CRE-gene links
+)
+
+# Create a non-significant category for In Design by subtracting significant from QC-passed
+in_design_data <- in_design_data %>%
+  mutate(Non_QC_CRE_gene_links = CRE_gene_links - Passed_QC,
+         Non_Significant_CRE_gene_links = Passed_QC - Significant_CRE_links) %>%
+  select(InteractionType, Non_QC_CRE_gene_links, Non_Significant_CRE_gene_links, Significant_CRE_links) %>%
+  pivot_longer(cols = Non_QC_CRE_gene_links:Significant_CRE_links, names_to = "Status", values_to = "Count") %>%
+  mutate(BarType = "In Design CRE-gene links")
+
+# Create your updated data frame for Distinct CREs
+distinct_cre_data <- data.frame(
+  InteractionType = c("distal", "Target gene promoter", "Target gene body", "trans", "indirect"),
+  Distinct_CREs = c(782, 226, 517, 1, 245),  # Distinct CREs
+  Passed_QC_Distinct = c(756, 194, 470, 0, 241),  # Passed QC distinct CREs
+  Significant_CRE_links = c(80, 149, 120, 0, 48)  # Significant distinct CRE-gene links
+)
+
+# Create a non-significant category for Distinct CREs by subtracting significant from QC-passed
+distinct_cre_data <- distinct_cre_data %>%
+  mutate(Non_QC_Distinct_CREs = Distinct_CREs - Passed_QC_Distinct,
+         Non_Significant_Distinct_CREs = Passed_QC_Distinct - Significant_CRE_links) %>%
+  select(InteractionType, Non_QC_Distinct_CREs, Non_Significant_Distinct_CREs, Significant_CRE_links) %>%
+  pivot_longer(cols = Non_QC_Distinct_CREs:Significant_CRE_links, names_to = "Status", values_to = "Count") %>%
+  mutate(BarType = "Distinct CREs")
+
+# Combine both datasets
+combined_data <- bind_rows(in_design_data, distinct_cre_data)
+
+# Assign FillType for coloring based on InteractionType and Status
+combined_data$FillType <- case_when(
+  combined_data$Status == "Non_QC_CRE_gene_links" | combined_data$Status == "Non_QC_Distinct_CREs" ~ paste0(combined_data$InteractionType, "_Non_QC"),
+  combined_data$Status == "Non_Significant_CRE_gene_links" | combined_data$Status == "Non_Significant_Distinct_CREs" ~ paste0(combined_data$InteractionType, "_Non_Significant"),
+  combined_data$Status == "Significant_CRE_links" ~ paste0(combined_data$InteractionType, "_Significant")
+)
+
+# Set custom colors using alpha for transparency
+custom_colors <- c(
+  "distal_Non_QC" = alpha("#66c2a5", 0.2),
+  "distal_Non_Significant" = alpha("#66c2a5", 0.6),
+  "distal_Significant" = alpha("#66c2a5", 1.0),
+  "Target gene promoter_Non_QC" = alpha("#fc8d62", 0.2),
+  "Target gene promoter_Non_Significant" = alpha("#fc8d62", 0.6),
+  "Target gene promoter_Significant" = alpha("#fc8d62", 1.0),
+  "Target gene body_Non_QC" = alpha("#8da0cb", 0.2),
+  "Target gene body_Non_Significant" = alpha("#8da0cb", 0.6),
+  "Target gene body_Significant" = alpha("#8da0cb", 1.0),
+  "trans_Non_QC" = alpha("#e78ac3", 0.2),
+  "trans_Non_Significant" = alpha("#e78ac3", 0.6),
+  "trans_Significant" = alpha("#e78ac3", 1.0),
+  "indirect_Non_QC" = alpha("#a6d854", 0.2),
+  "indirect_Non_Significant" = alpha("#a6d854", 0.6),
+  "indirect_Significant" = alpha("#a6d854", 1.0)
+)
+
+# Plot with side-by-side bars for "In Design" and "Distinct CREs"
+ggplot(combined_data, aes(x = BarType, y = Count, fill = FillType)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = custom_colors) +
+  labs(title = "CRE-gene Links: In Design vs Distinct CREs",
+       x = "", 
+       y = "Number of CRE-gene Links", 
+       fill = "Interaction Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ 
+
+```
+```{r}
+#read prioritised gene list
+links <- fread("/g/steinmetz/project/otar/select_genes_full_screen/prioritised_gene_list_100kb_up_downstream_eQTL_GRN_aim1_E2G_nonGWAS_extended_windows_2024-03-01.tsv")
+
+
+
+#Adjust some info in the links dataframe
+links <- links %>%
+  mutate(SNP_trait = case_when(SNP_trait == "" ~ source, #add source to SNP trait for non GWAS links
+                               .default = SNP_trait),
+         peak_type = case_when(peak_type == "" ~ "control", #add peak type to peaks that were selected as controls
+                               .default = peak_type)) %>%
+ # filter(SNP_trait != "nonGWAS_control_gsk") %>% #these are in there double
+  filter(SNP_trait != "nonGWAS_control_pilot") %>% #these are in there double
+  filter(SNP_trait != "nonGWAS_control_promoter") %>% #these are in there double
+  filter(SNP_trait != "nonGWAS_eQTL") %>% #these are in there double
+  filter(SNP_trait != "nonGWAS_Nila_validation") %>% #these are in there double
+  mutate(link_id = paste0(peak, "_", gene_id),
+         dummy = 1) %>% #make dummy variable to spread selection categories
+  pivot_wider(names_from = source, values_from = dummy) %>%
+  mutate(downstream = case_when(downstream == 1 & `100kb window` == 1 ~ NA, #remove annotations as downstream if the link is also in 100kb or overlap
+                                downstream == 1 & overlap == 1 ~ NA,
+                                .default = downstream),
+         upstream = case_when(upstream == 1 & `100kb window` == 1 ~ NA, #remove annotations as upstream if the link is also in 100kb or overlap
+                              upstream == 1 & overlap == 1 ~ NA,
+                              .default = upstream),
+         `100kb window` = case_when(`100kb window` == 1 & overlap == 1 ~ NA, #remove annotations as 100kb window if the link is also overlapping a gene
+                                    .default = `100kb window`)) %>%
+  pivot_longer(cols = `100kb window`:aim1,
+               names_to = "source",
+               values_to = "dummy") %>%
+  filter(!is.na(dummy))
+
+#Separate the information about the peaks
+peaks <- links %>%
+  mutate(peak_type = case_when(peak_type == "" ~ "control", #add peak type to peaks that were selected as controls
+                               .default = peak_type)) %>%
+  select(peak, peak_type, SNP_trait) %>%
+  distinct() 
+
+#keep only guide id, gene id, and reason for the prioritisation
+links_source <- links %>%
+  select(link_id, source) %>%
+  distinct() 
+
+links_select <- links %>%
+  select(peak, SNP_trait)
+
+results_df <- results_df %>%
+   mutate(grna_target = case_when(grna_target == "CD28" ~ "chr2:203706639-203706639", #add promoter controls as gene names (as in results)
+                                 grna_target == "CTLA4" ~ "chr2:203867771-203867771",
+                                 grna_target == "IL2RA" ~ "chr10:6062367-6062367",
+                                 grna_target == "CD81" ~ "chr11:2377310-2377310",
+                                 grna_target == "CD4" ~ "chr12:6789528-6789528",
+                                 grna_target == "SP140" ~ "chr2:230225130-230226457", #add pilot controls as gene names (as in results)
+                                 grna_target == "CAB39" ~ "chr2:230658624-230659752",
+                                 grna_target == "PIM1" ~ "chr6:37050015-37051033",
+                                 grna_target == "CCND2" ~ "chr12:4153422-4154015",
+                                 grna_target == "JUND" ~ "chr19:18291227-18293782",
+                                 .default = grna_target)) %>%
+  #separate(grna_target, remove = F, into = c("enhancer_chr", "enhancer_start", "enhancer_end")) %>% #save enhancer position
+  mutate(#enhancer_start = as.integer(enhancer_start),
+         #enhancer_end = as.integer(enhancer_end),
+         link_id = paste0(grna_target, "_", gene_id))
+
+#add the link sources and add simplified source (combine eQTL sources, combine GRN sources, combine up- and downstream, combine 100kb and overlap)
+res_gene_sources <- results_df %>%
+  left_join(links_source, by = "link_id") %>%
+  mutate(source = case_when(is.na(source) ~ "not prioritised",
+                            .default = source)) %>%
+  mutate(source_simplified = case_when(str_detect(source, "GRN") ~ "GRN",
+                                       str_detect(source, "eQTL") ~ "eQTL",
+                                       str_detect(source, "100kb") ~ "100kb window",
+                                       str_detect(source, "overlap") ~ "100kb window",
+                                       str_detect(source, "stream") ~ "up- and\ndownstream",
+                                       str_detect(source, "nonGWAS_Nila_validation") ~ NA, #too few hits to merit their own category
+                                       .default = source))
+
+
+res_gene_source <- res_gene_sources %>%
+  left_join(links_select, by = c("grna_target" = "peak")) %>%
+  mutate(select = case_when(is.na(SNP_trait) ~ "not prioritised",
+                            .default = SNP_trait)) %>%
+  mutate(select = case_when(           str_detect(SNP_trait, "eQTL") ~ "eQTL",
+                                       str_detect(SNP_trait, "nonGWAS_GRN") ~ "GRN",
+                                       str_detect(SNP_trait, "GRN") ~ "GRN",
+                                       str_detect(SNP_trait, "control_promoter") ~ "control promoter",
+                                       str_detect(SNP_trait, "control_gsk") ~ "control enhancer",
+                                       str_detect(SNP_trait, "control_pilot") ~ "control enhancer",
+                                       str_detect(SNP_trait, "Nila_validation") ~ "control enhancer",
+                                      TRUE ~ "GWAS"
+                                       ))
+                                      
+
+
+#save control promoter peaks
+promoters <- peaks %>% filter(SNP_trait == "control_promoter") %>% pull(peak)
+
+res_gene_sources <-res_gene_sources %>% select(-source) %>% distinct()
+```
+
+```{r}
+# compute distance of enhancers to gene or TSS
+compute_distance_to_feature <- function(etp, annot, name = "distance", group_col = NULL) {
+  
+  # remove any ETPs without enhancer coordinates (e.g. promoter controls)
+  etp <- filter(etp, !is.na(pert_chr))
+  
+  # GRanges object for all E-G pairs in ETP table using enhancers as coordinates
+  eg_pairs <- makeGRangesFromDataFrame(etp, seqnames.field = "pert_chr", start.field = "pert_start",
+                                       end = "pert_end", keep.extra.columns = TRUE)
+  #eg_pairs <- resize(eg_pairs, width = 1, fix = "center")
+  
+  # combine into a paired GRanges object containing enhancer and TSS/gene annotations for each pair
+  eg_pairs <- Pairs(first = eg_pairs, second = annot[eg_pairs$gene_id])
+  
+  # compute distance between enhancers and provided TSS / gene annotations
+  distance <- distance(eg_pairs)
+  
+  # set distance of upstream interactions to negative numbers
+  upstream_pairs <- end(first(eg_pairs)) < start(second(eg_pairs))
+  distance[upstream_pairs] <- distance[upstream_pairs] * -1
+  
+  # create output table
+  output <- eg_pairs %>% 
+    first() %>% 
+    as.data.frame() %>% 
+    select(all_of(c(group_col, "grna_target", "gene_id"))) %>% 
+    mutate(!!name := distance)
+  
+  return(output)
+  
+}
+
+# load gene annotations
+genes <- import("/g/steinmetz/gschwind/otar/manuscript_analyses/resources/genes.gtf")
+
+# calculate gene locus coordinates for each gene
+genes <- split(genes, f = genes$gene_id)
+genes <- unlist(range(genes))
+genes$gene_id <- names(genes)
+
+# compute gene TSSs
+tss <- promoters(genes, upstream = 0, downstream = 1)
+
+etp <- read_csv("/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/results_df.csv", show_col_types = FALSE)
+# replace gene coordinates with annotations used to compute distance to genes
+etp <- genes %>% 
+  as.data.frame() %>% 
+  select(gene_id, gene_chr = seqnames, gene_start = start, gene_end = end, gene_strand = strand) %>% 
+  left_join(select(etp, -c(gene_chr, gene_start, gene_end, gene_tss)), ., by = "gene_id")
+
+# add gene tss coordinates
+etp <- tss %>% 
+  as.data.frame() %>% 
+  select(gene_id, gene_tss = start) %>% 
+  left_join(etp, ., by = "gene_id")
+
+# compute distance to gene and TSS
+dist_to_gene <- compute_distance_to_feature(etp, annot = genes, name = "dist_to_gene", group_col = "panel")
+dist_to_tss  <- compute_distance_to_feature(etp, annot = tss,   name = "dist_to_tss",  group_col = "panel")
+
+# replace distances in ETP table with recalculated distances
+etp <- etp %>% 
+  select(-c(distance, TSS_dist)) %>% 
+  left_join(dist_to_gene, by = c("panel", "grna_target", "gene_id")) %>% 
+  left_join(dist_to_tss,  by = c("panel", "grna_target", "gene_id"))
+
+
+results_df <- results_df %>%
+  left_join(
+    etp %>%
+      select(panel, grna_target, response_id, dist_to_tss, dist_to_gene) %>%
+      rename(
+        dist_to_tss_raw = dist_to_tss,
+        dist_to_gene_raw = dist_to_gene
+      ),
+    by = c("panel", "grna_target", "response_id")
+  )
+
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(reshape2)
+
+# Interaction Type Data
+interaction_data <- data.frame(
+  Interaction_Type = c("distal", "Target gene promoter", "Target gene body", "trans", "indirect"),
+  Total_Distinct_CREs = c(782, 226, 517, 1, 245),
+  Total_CRE_gene_links = c(2723, 253, 527, 1, 1330),
+  Significant_Distinct_CREs = c(80, 149, 120, 0, 48),
+  Significant_CRE_gene_links = c(101, 163, 120, 0, 67),
+  Passed_QC_CRE_gene_links = c(2292, 216, 476, 0, 1137),
+  Passed_QC_Distinct_CREs = c(756, 194, 470, 0, 241)
+)
+
+# Updated CRE-gene link selection data including E2G
+cre_gene_link_data <- data.frame(
+  Selection_Type = c("GRN", "eQTL", "100kb window", "Up- and down-stream", "E2G"),
+  Total_CRE_gene_links = c(1303, 121, 3632, 703, 1092),
+  Significant_CRE_gene_links = c(165, 39, 434, 12, 302),
+  Passed_QC_CRE_gene_links = c(1190, 114, 3107, 560, 964)
+)
+
+# CRE selection data
+cre_selection_data <- data.frame(
+  Selection_Type = c("GRN", "eQTL", "GWAS"),
+  Total_Distinct_CREs = c(100, 83, 844),
+  Significant_Distinct_CREs = c(45, 55, 378),
+  Passed_QC_Distinct_CREs = c(100, 83, 843)
+)
+
+# Reshape interaction type data for plotting
+interaction_data_long <- melt(interaction_data, 
+                              id.vars = "Interaction_Type", 
+                              measure.vars = c("Passed_QC_Distinct_CREs", "Significant_Distinct_CREs", "Total_Distinct_CREs",
+                                                "Passed_QC_CRE_gene_links", "Significant_CRE_gene_links", "Total_CRE_gene_links"),
+                              variable.name = "Category", 
+                              value.name = "Count")
+
+interaction_data_long$CRE_Type <- ifelse(grepl("Distinct", interaction_data_long$Category), "Distinct CREs", "CRE-gene Links")
+interaction_data_long$Category <- gsub("Passed_QC_Distinct_CREs", "Passed QC", interaction_data_long$Category)
+interaction_data_long$Category <- gsub("Significant_Distinct_CREs", "Significant", interaction_data_long$Category)
+interaction_data_long$Category <- gsub("Total_Distinct_CREs", "Total", interaction_data_long$Category)
+interaction_data_long$Category <- gsub("Passed_QC_CRE_gene_links", "Passed QC", interaction_data_long$Category)
+interaction_data_long$Category <- gsub("Significant_CRE_gene_links", "Significant", interaction_data_long$Category)
+interaction_data_long$Category <- gsub("Total_CRE_gene_links", "Total", interaction_data_long$Category)
+# Adjust the values so that Passed QC and Total show only the part that isn't covered by smaller subsets
+interaction_data_long <- within(interaction_data_long, {
+  Count <- ifelse(Category == "Passed QC", 
+                  Count - interaction_data_long[interaction_data_long$Category == "Significant", "Count"], 
+                  ifelse(Category == "Total", 
+                         Count - interaction_data_long[interaction_data_long$Category == "Passed QC", "Count"], 
+                         Count))
+})
+
+# Reshape CRE-gene link selection data and adjust for proper proportions
+cre_gene_link_data_long <- melt(cre_gene_link_data, 
+                                id.vars = "Selection_Type", 
+                                measure.vars = c("Passed_QC_CRE_gene_links", "Significant_CRE_gene_links", "Total_CRE_gene_links"),
+                                variable.name = "Category", value.name = "Count")
+cre_gene_link_data_long$Category <- gsub("Passed_QC_CRE_gene_links", "Passed QC", cre_gene_link_data_long$Category)
+cre_gene_link_data_long$Category <- gsub("Significant_CRE_gene_links", "Significant", cre_gene_link_data_long$Category)
+cre_gene_link_data_long$Category <- gsub("Total_CRE_gene_links", "Total", cre_gene_link_data_long$Category)
+
+# Adjust values for proportions in CRE-gene link data
+cre_gene_link_data_long <- within(cre_gene_link_data_long, {
+  Count <- ifelse(Category == "Passed QC", 
+                  Count - cre_gene_link_data_long[cre_gene_link_data_long$Category == "Significant", "Count"], 
+                  ifelse(Category == "Total", 
+                         Count - cre_gene_link_data_long[cre_gene_link_data_long$Category == "Passed QC", "Count"], 
+                         Count))
+})
+
+# Reshape CRE selection data and adjust for proper proportions
+cre_selection_data_long <- melt(cre_selection_data, 
+                                id.vars = "Selection_Type", 
+                                measure.vars = c("Passed_QC_Distinct_CREs", "Significant_Distinct_CREs", "Total_Distinct_CREs"),
+                                variable.name = "Category", value.name = "Count")
+cre_selection_data_long$Category <- gsub("Passed_QC_Distinct_CREs", "Passed QC", cre_selection_data_long$Category)
+cre_selection_data_long$Category <- gsub("Significant_Distinct_CREs", "Significant", cre_selection_data_long$Category)
+cre_selection_data_long$Category <- gsub("Total_Distinct_CREs", "Total", cre_selection_data_long$Category)
+
+cre_selection_data_long <- within(cre_selection_data_long, {
+  Count <- ifelse(Category == "Passed QC", 
+                  Count - cre_selection_data_long[cre_selection_data_long$Category == "Significant", "Count"], 
+                  ifelse(Category == "Total", 
+                         Count - cre_selection_data_long[cre_selection_data_long$Category == "Passed QC", "Count"], 
+                         Count))
+})
+
+# Combine datasets for distinct CREs and CRE selection
+interaction_data_long$Type <- interaction_data_long$Interaction_Type
+cre_gene_link_data_long$Type <- cre_gene_link_data_long$Selection_Type
+cre_selection_data_long$Type <- cre_selection_data_long$Selection_Type
+
+interaction_data_long$Dataset <- "Interaction Type"
+cre_gene_link_data_long$Dataset <- "CRE-gene Link Selection"
+cre_selection_data_long$Dataset <- "CRE Selection"
+
+interaction_data_long <- interaction_data_long[, c("Type", "Category", "Count", "CRE_Type", "Dataset")]
+cre_gene_link_data_long$CRE_Type <- "CRE-gene Links"
+cre_gene_link_data_long <- cre_gene_link_data_long[, c("Type", "Category", "Count", "CRE_Type", "Dataset")]
+cre_selection_data_long$CRE_Type <- "Distinct CREs"
+cre_selection_data_long <- cre_selection_data_long[, c("Type", "Category", "Count", "CRE_Type", "Dataset")]
+
+# Combine datasets for final plotting
+distinct_cre_data <- rbind(interaction_data_long[interaction_data_long$CRE_Type == "Distinct CREs", ], cre_selection_data_long)
+cre_gene_links_data <- rbind(interaction_data_long[interaction_data_long$CRE_Type == "CRE-gene Links", ], cre_gene_link_data_long)
+
+# Custom base colors for Distinct CREs and CRE Selection
+distinct_cre_colors <- c(
+  "distal" = "#daa520",            # Blue for Distinct CREs
+  "Target gene promoter" = "#6ebff5",  # Orange
+  "Target gene body" = "#4299d4",
+  "indirect" = "#0263a3", 
+  "trans" = "#9ad8fc", 
+  "GRN" = "#D95F02",                # Purple for CRE Selection
+  "eQTL" = "#1B9E77",               # Brown
+  "GWAS" = "#7570B3"                # Pink
+)
+
+
+# Calculate the degree (number of connections) for each node
+# Custom base colors for CRE-gene Links and CRE-gene Link Selection
+cre_gene_link_colors <- c(
+  "distal" = "#daa520",      
+   "Target gene promoter" = "#6ebff5",  # Orange
+  "Target gene body" = "#4299d4",
+  "indirect" = "#0263a3", 
+  "trans" = "#9ad8fc", 
+  "GRN" = "#D95F02",                   # Purple
+  "eQTL" = "#1B9E77",                  # Brown
+  "100kb window" = "#a5772b",          # Yellow
+  "Up- and down-stream" = "#7570b3",   # Cyan
+  "E2G" = "#e62a8a"                    # Grey for E2G
+)
+
+
+# Alpha levels for Total, Passed QC, and Significant
+alpha_values <- c("Total" = 0.3, "Passed QC" = 0.6, "Significant" = 1)
+
+#Reorder the factor levels to ensure Total is always on top, Not Passed QC in the middle, and Significant at the bottom
+distinct_cre_data$Category <- factor(distinct_cre_data$Category, levels = c("Total", "Passed QC","Significant"))
+cre_gene_links_data$Category <- factor(cre_gene_links_data$Category, levels = c("Total", "Passed QC","Significant"))
+# Plot 1: Distinct CREs and CRE Selection
+distinct_cre_plot <- ggplot(distinct_cre_data, aes(x = Type, y = Count, fill = Type, alpha = Category)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(~ Dataset, scales = "free_x") +
+  scale_alpha_manual(values = alpha_values) +
+  scale_fill_manual(values = distinct_cre_colors) +
+  theme_manuscript_default()+
+  labs(title = "All distinct CREs", x = "Type", y = "Count", fill = "Type", alpha = "Category") 
+
+# Plot 2: CRE-gene Links and CRE-gene Link Selection
+cre_gene_links_plot <- ggplot(cre_gene_links_data %>%filter(Dataset =="Interaction Type"), aes(x = Type, y = Count, fill = Type, alpha = Category)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(~ Dataset, scales = "free_x") +
+  scale_alpha_manual(values = alpha_values) +
+  scale_fill_manual(values = cre_gene_link_colors) +
+  theme_manuscript_default()+
+  labs(title = "All prioritized CRE-gene links", x = "Type", y = "Count", fill = "Type", alpha = "Category") 
+
+# Display both plots
+pdf(paste0(outdir, "/241031_Interaction_type_CRE-gene-link_selection.pdf"), height = 8, width = 10)
+print(cre_gene_links_plot)
+dev.off()
+
+
+pdf(paste0(outdir, "/241031_Interaction_type_distinct_CREs_selection_flipped.pdf"), height = 8, width = 10)
+print(distinct_cre_plot)
+dev.off()
+```
+```{r}
+#how many hits per target gene?
+
+hits <- results_df%>% filter(significant ==TRUE, interaction_type=="distal", ctrl_perturbation==FALSE)
+# Step 1: Summarize the number of grna_targets per response_id
+response_to_grna_summary <- hits %>%
+  group_by(response_id) %>%
+  summarise(grna_target_count = n_distinct(grna_target)) %>%
+  mutate(type = "# distal CREs regulating a gene")
+
+# Step 2: Summarize the number of response_ids per grna_target
+grna_to_response_summary <- hits %>%
+  group_by(grna_target) %>%
+  summarise(response_id_count = n_distinct(response_id)) %>%
+  mutate(type = "# genes regulated by a distal CRE")
+
+# Step 3: Combine the two summaries into a single dataframe
+combined_summary <- bind_rows(
+  response_to_grna_summary %>%
+    rename(count = grna_target_count),
+  grna_to_response_summary %>%
+    rename(response_id = grna_target, count = response_id_count)
+)
+
+
+
+
+# Step 4: Create a histogram-like bar plot for both distributions
+plot1 <- ggplot(combined_summary, aes(x = count, fill = type)) +
+  geom_bar(position = "dodge", binwidth = 1) +
+  theme_manuscript_default()+
+  labs(title = "",
+       x = "Count",
+       y = "Frequency",
+       fill = "Type") +
+    scale_fill_manual(values = c("# genes regulated by a distal CRE" = "#40c7f3", 
+                               "# distal CREs regulating a gene" = "#f8993d")) +
+    scale_x_continuous() # Adjust x-axis breaks
+
+pdf(paste0(outdir, "/241031_number_of_CRE_GENE_distal.pdf"), height = 6, width = 6)
+plot1
+dev.off()
+
+
+
+up <- results_df%>% filter(significant ==TRUE, ctrl_perturbation==FALSE, log_2_fold_change>=0)%>%
+  group_by(interaction_type) %>% tally()
+down<-results_df%>% filter(significant ==TRUE, ctrl_perturbation==FALSE, log_2_fold_change<=0)%>%
+  group_by(interaction_type) %>% tally()
+
+# Add a column to specify "direction" (up or down)
+up$direction <- "up"
+down$direction <- "down"
+
+# Add a negative sign to the down values
+down$n <- -down$n
+
+# Combine both up and down into one data frame
+combined <- rbind(up, down)
+
+# Create the barplot
+
+# Create the barplot with count labels
+up.down <- ggplot(combined, aes(x = interaction_type, y = n, fill = direction)) +
+  geom_bar(stat = "identity", position = "identity") +
+ geom_text(aes(label = abs(n)),  # Display absolute value of n
+            position = position_dodge(width = 0),  # Keep the text above the bars
+            vjust = ifelse(combined$n >= 0, -0.3, 1.3),  # Labels above for up, below for down
+            size = 3,  # Adjust size as needed
+            color = "black") +  # Text color
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) +
+  scale_fill_manual(values = c("up" = "#f8993d",  # Color for upregulated
+                               "down" = "#40c7f3")) +  # Color for downregulated
+  labs(x = "Interaction Type", y = "Count", title = "Up and Downregulated Genes upon CRE Perturbation") +
+  theme_manuscript_default()  # Keep your custom theme
+
+
+pdf("/g/steinmetz/moonen/Thesis/figures/311024_nr_of_up_and_down_regulated_by_interaction_type.pdf", height = 6, width = 6)
+up.down
+dev.off()
+
+##validation of different sources of links
+summary_interaction <- res_gene_sources %>% select(-source) %>% distinct() %>% filter(ctrl_perturbation==FALSE) %>%
+  filter(!is.na(source_simplified)) %>% #remove hits without simplified source info
+  filter(!is.na(interaction_type)) %>%
+  filter(significant == T) %>% #keep only significant results
+  group_by(source_simplified, interaction_type) %>%
+  tally() %>%
+  group_by(source_simplified) %>%
+  mutate(tot_sum = sum(n)) %>%
+  ungroup() 
+
+##validation of different sources of links
+summary_interaction_genesource <- res_gene_source %>% select(-SNP_trait, -source_simplified)%>% distinct() %>%filter(ctrl_perturbation==FALSE) %>% filter(significant == T) %>% #keep only significant results
+  group_by(select, interaction_type, grna_target) %>%
+  tally() %>%
+  group_by(select) %>%
+  mutate(tot_sum = sum(n)) %>%
+  ungroup() 
+
+
+levels<-levels(summary_interaction$interaction_type)
+category_colors <- c("distal"="#daa520", "indirect"="#0263a3", "target_gene_body"="#4299d4", "target_gene_promoter"="#6ebff5", "trans"="#9ad8fc", "NS"="#a9a9a9")
+
+# Stacked bar plot of numbers
+ggplot(summary_interaction, aes(fill=fct_rev(interaction_type), y=n, x=fct_reorder(source_simplified, tot_sum))) +  #ordered by number
+  geom_bar(stat="identity") +
+  scale_fill_manual(values = category_colors)  +
+ # scale_fill_brewer(palette = "PuOr", direction = -1)  +
+  theme_manuscript_default()+
+  ylab("\nNumber") +
+  xlab("") +
+  ggtitle("Significant hits by gene source") +
+  guides(fill = guide_legend(title = "Distance\nenhancer to gene",
+                             reverse = T))
+ggsave(paste0(outdir, "/241031_Number_of_validated_links_source_interaction_colour_flipped", Sys.Date(), ".pdf"), height = 4, width = 6)
+
+# summary_source <- res_gene_sources %>% select(-source) %>% distinct() %>% #filter(ctrl_perturbation==FALSE)%>%
+#   filter(!is.na(source_simplified)) %>% #remove hits without simplified source info
+#   group_by(source_simplified) %>%
+#   summarize(yes = sum(significant, na.rm = T), #number of significant links for each gene source
+#             no = sum(!significant, na.rm = T), #number of not significant links for each gene source
+#             failed_QC = sum(is.na(significant))) %>% #number of failed QC links for each gene source
+#   mutate(pct_sign = yes / (yes+no), #percentage of significant links
+#          source_simplified = fct_reorder(source_simplified, pct_sign)) %>% #adjust order
+#   pivot_longer(cols = c(-source_simplified, -pct_sign), names_to = "significance")
+
+summary_source <-res_gene_sources  %>%distinct() %>%filter(ctrl_perturbation==FALSE, pass_qc)%>%
+  group_by(source_simplified) %>%
+  summarize(yes = sum(significant, na.rm = T), #number of significant links for each gene source
+            no = sum(!significant, na.rm = T)) %>%#number of not significant links for each gene source
+mutate(pct_sign = yes/(yes+no),
+       source_simplified=fct_reorder(source_simplified, pct_sign)) %>% #adjust order
+  pivot_longer(cols = c(-source_simplified, -pct_sign), names_to = "significance")
+
+summary_source_passQC <- summary_source %>%
+  filter(significance != "failed_QC") %>%
+  filter(source_simplified != "not prioritised") %>%
+  mutate(source_simplified = fct_reorder(source_simplified, value))
+```
+
+```{r}
+results_df_wp_controls <- results_df %>%
+     filter(grna_target %in% c("IL2RA", "CD81", "CD4", "CD28", "CTLA4", "JUND", "PIM1", "CAB39", "CCND2", "SP140", "chr2:203930706-203942262", "chr5:56139147-56162711" ), is_target)
+
+results_df_wp_promoter_controls <- results_df %>%
+     filter(grna_target %in% c("IL2RA", "CD81", "CD4", "CD28", "CTLA4"), is_target)
+
+# Create the heatmap
+ggplot(results_df_wp_promoter_controls, aes(x = factor(panel), y = factor(grna_target), fill = log_2_fold_change)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +  # Adjust colors for log fold change
+  geom_point(data = results_df_wp_controls %>% filter(significant == TRUE), 
+             aes(x = factor(panel), y = factor(grna_target)), 
+             shape = 21, color = "black", fill = "black", size = 2) +  # Overlay dots for significant values
+  theme_minimal() +
+  labs(title = "Heatmap of log_2_fold_change across Panels and grna_targets",
+       x = "Panel",
+       y = "grna_target",
+       fill = "log_2_fold_change") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Define the custom color palette for each panel explicitly
+panel_colors <- c("1" = "#9a1b28", "2" = "#b43f53", "3" = "#cb7a88", 
+                  "4" = "#e6b8bf", "5" = "#986226", "6" = "#b2823d", 
+                  "7" = "#ccab7b", "8" = "#e7d3b9", "9" = "#559a43", 
+                  "10" = "#79b442", "11" = "#a3cb7a", "12" = "#d0e6b9", 
+                  "13" = "#158299", "14" = "#3f9fb3", "15" = "#7cbecc", 
+                  "16" = "#b9dee6")
+
+# Ensure that the 'panel' variable is treated as a factor (optional, if necessary)
+results_df_wp_promoter_controls$panel <- factor(results_df_wp_promoter_controls$panel)
+
+desired_order <- c("CD28", "CTLA4","IL2RA","CD81", "CD4")
+
+# Define the custom color palette for each grna_target
+grna_target_colors <- c("CD28" = "#1f78b4", "CTLA4" = "#33a02c", "IL2RA" = "#e31a1c", 
+                      "CD81" = "#ff7f00", "CD4" = "#6a3d9a")
+
+# Calculate the number of significant points per grna_target
+significant_counts <- results_df_wp_promoter_controls %>%
+  filter(significant == TRUE) %>%
+  group_by(grna_target) %>%
+  summarise(significant_count = n())
+
+
+violin_summary <- results_df_wp_promoter_controls %>%
+  filter(significant == TRUE) %>%
+  group_by(grna_target) %>%
+  summarise(
+    significant_count = n(),
+    mean_log2fc = mean(log_2_fold_change),
+    max_log2fc = max(log_2_fold_change),
+    variance = var(log_2_fold_change),
+    std_dev = sd(log_2_fold_change),
+    cv_percent = (std_dev / abs(mean_log2fc)) * 100  # Use absolute value to avoid negative percentages
+  )
+plot2<- ggplot(results_df_wp_promoter_controls, aes(x = factor(grna_target, levels = desired_order), y = log_2_fold_change)) +
+  geom_violin(aes(fill = factor(grna_target)), trim = TRUE, scale = "width", alpha = 0.3) +  # Use fill for violin, alpha set to 0.3
+  geom_jitter(aes(color = panel, shape = significant), width = 0.2, height = 0, size = 2) +  # Use color for jitter (panels)
+  scale_fill_manual(values = grna_target_colors, name = "grna target") +  # Apply custom colors for violins (grna_target)
+  scale_color_manual(values = panel_colors, name = "Panel") +  # Apply custom colors for jitter points (panels)
+  theme_manuscript_default() +
+  geom_text(data = violin_summary, 
+            aes(x = factor(grna_target), y = max_log2fc + 0.2, label = paste("n =", significant_count)),  # Place n=x just above max value
+            size = 4, vjust = 0) +  # Adjust text size and vertical position
+  labs(title = "Effect size per control promoter targeting",
+       x = "Control promoter",
+       y = "log2FC",
+       fill = "grna_target",
+       color = "Panel",
+       shape = "Significant") +
+  expand_limits(y = 0)
+
+pdf(paste0(outdir, "/promoter_effect_sizes.pdf"), height = 6, width = 6)
+plot2
+dev.off()
+
+
+```
+
+```{r}
+
+library(ggplot2)
+library(cowplot)
+
+# Function to extract the legend from a ggplot
+get_legend <- function(my_plot) {
+  plot_gtable <- ggplotGrob(my_plot)
+  guide_box <- plot_gtable$grobs[which(sapply(plot_gtable$grobs, function(x) x$name) == "guide-box")]
+  return(guide_box[[1]])
+}
+
+# Create individual plots
+SP140 <- plot_response_grna_target_pair(sceptre_object = sceptre_obj_,
+                                        response_id = "SP140",
+                                        grna_target = "SP140") + theme_manuscript_default() 
+
+CAB39 <- plot_response_grna_target_pair(sceptre_object = sceptre_obj,
+                                        response_id = "CAB39",
+                                        grna_target = "CAB39") + theme_manuscript_default()
+
+JUND <- plot_response_grna_target_pair(sceptre_object = sceptre_obj,
+                                       response_id = "JUND",
+                                       grna_target = "JUND") + theme_manuscript_default()
+
+CCND2 <- plot_response_grna_target_pair(sceptre_object = sceptre_obj,
+                                        response_id = "CCND2",
+                                        grna_target = "CCND2") + theme_manuscript_default()
+
+PIM1 <- plot_response_grna_target_pair(sceptre_object = sceptre_obj,
+                                       response_id = "PIM1",
+                                       grna_target = "PIM1") + theme_manuscript_default()
+
+# Determine common y-axis limits
+y_min <- min(ggplot_build(SP140)$layout$panel_scales_y[[1]]$range$range[1],
+             ggplot_build(CAB39)$layout$panel_scales_y[[1]]$range$range[1],
+             ggplot_build(JUND)$layout$panel_scales_y[[1]]$range$range[1],
+             ggplot_build(CCND2)$layout$panel_scales_y[[1]]$range$range[1],
+             ggplot_build(PIM1)$layout$panel_scales_y[[1]]$range$range[1])
+
+y_max <- max(ggplot_build(SP140)$layout$panel_scales_y[[1]]$range$range[2],
+             ggplot_build(CAB39)$layout$panel_scales_y[[1]]$range$range[2],
+             ggplot_build(JUND)$layout$panel_scales_y[[1]]$range$range[2],
+             ggplot_build(CCND2)$layout$panel_scales_y[[1]]$range$range[2],
+             ggplot_build(PIM1)$layout$panel_scales_y[[1]]$range$range[2])
+
+# Set the same y-axis limits for all plots
+JUND <- JUND + ylim(y_min, y_max) 
+CAB39 <- CAB39 + ylim(y_min, y_max) + theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank())
+SP140 <- SP140 + ylim(y_min, y_max) + theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank())
+CCND2 <- CCND2 + ylim(y_min, y_max) + theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank())
+PIM1 <- PIM1 + ylim(y_min, y_max) + theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank())
+
+# Extract the legend from one of the plots (e.g., SP140)
+shared_legend <- get_legend(JUND)
+
+# Remove legends from the individual plots
+JUND <- JUND + theme(legend.position = "none")
+SP140 <- SP140 + theme(legend.position = "none")
+CAB39 <- CAB39 + theme(legend.position = "none")
+PIM1 <- PIM1 + theme(legend.position = "none")
+CCND2 <- CCND2 + theme(legend.position = "none")
+
+
+# Combine the plots into a single row, align them by y-axis
+combined_plots <- plot_grid(JUND, SP140, CAB39, PIM1, CCND2,ncol = 5, align = "v", axis = "tb")
+
+# Add the shared legend at the bottom
+final_plot <- plot_grid(combined_plots, shared_legend, ncol = 1, rel_heights = c(1, 0.1))  # Adjust rel_heights for proper sizing
+
+# Display the final plot
+print(final_plot)
+
+pdf(paste0(outdir, "/control_enhancer_perturbations.pdf"), height = 6, width = 10)
+final_plot
+dev.off()
+
+```
+
+for other pairs
+```{r}
+sceptre_obj_p4 <-readRDS("/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel4/sceptre_obj_finished.rds")
+sceptre_obj_p11 <-readRDS("/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel11/sceptre_obj_finished.rds")
+sceptre_obj_p15 <-readRDS("/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel15/sceptre_obj_finished.rds")
+sceptre_obj_p8 <-readRDS("/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel8/sceptre_obj_finished.rds")
+sceptre_obj_p14 <-readRDS("/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/Panel14/sceptre_obj_finished.rds")
+SEPHS2 <- plot_response_grna_target_pair(sceptre_object = sceptre_obj_p14,
+                                        response_id = "SEPHS2",
+                                        grna_target = "chr16:30458439-30459329") + theme_manuscript_default() 
+
+#### for my own aesthetics 
+
+plot_response_grna_target_single <- function(sceptre_object, response_id, grna_target, results_df) {
+  # Custom colors for the response_id (treatment) and control
+  treatment_control_colors <- c(
+    "chr16:30458439-30459329" = "#f8993d",  # Color for the response_id
+    "chr16:30470935-30471398" = "#40c7f3",
+    "Non-targeting" = "gray80"  # Color for the control
+  )
+
+  # Extract the counts for this pair; filter for cells in use
+  response_matrix <- get_response_matrix(sceptre_object)
+  y <- response_matrix[response_id, sceptre_object@cells_in_use]
+
+  # Get the sequencing depths; filter for cells in use
+  response_n_umis <- sceptre_object@covariate_data_frame$response_n_umis[sceptre_object@cells_in_use]
+
+  # Compute the normalized counts
+  normalized_counts <- log(10000 * y / response_n_umis + 1)
+
+  # Get the treated cells and control cells
+  trt_cells <- normalized_counts[sceptre_object@grna_assignments$grna_group_idxs[[grna_target]]]
+  cntrl_cells <- normalized_counts[-sceptre_object@grna_assignments$grna_group_idxs[[grna_target]]]
+
+  # Construct the data frame
+  to_plot <- data.frame(
+    normalized_count = c(trt_cells, cntrl_cells),
+    treatment = factor(c(rep(grna_target, length(trt_cells)), rep("Non-targeting", length(cntrl_cells))), levels = c(grna_target, "Non-targeting"))
+  )
+
+  # Extract relevant statistics for annotation
+  log2_fc <- results_df$log_2_fold_change[results_df$grna_target == grna_target & results_df$response_id == response_id]
+  p_val <- results_df$p_value[results_df$grna_target == grna_target & results_df$response_id == response_id]
+
+  annotation <- paste0("Log2FC = ", round(log2_fc, 2), ", p-value = ", format(p_val, scientific = TRUE, digits = 2))
+
+  # Plot the data
+  p_out <- ggplot(to_plot, aes(x = treatment, y = normalized_count, fill = treatment)) +
+    geom_violin(alpha = 0.6, color = "black", draw_quantiles = c(0.5)) +  # Add median line
+    #geom_boxplot()+
+    theme_manuscript_default() +
+    ggtitle(paste(response_id)) +
+    ylab("Normalized Gene Expression") +
+    xlab("Treatment") +
+    theme(legend.position = "none") +
+    scale_fill_manual(values = treatment_control_colors)
+
+  # Add annotation
+  p_out <- p_out + annotate("text", x = 1.5, y = 9.5, label = annotation, size = 3, hjust = 0.5)
+
+  return(p_out)
+}
+
+# Set up the parameters
+sceptre_object <- sceptre_obj_p14
+response_id <- "SEPHS2"
+grna_target_1 <- "chr16:30458439-30459329"
+grna_target_2 <- "chr16:30470935-30471398"
+
+# Generate the plot
+p_SEPHS2 <- plot_response_grna_target_single(
+  sceptre_object = sceptre_object,
+  response_id = response_id,
+  grna_target = c(grna_target_1, grna_target_2),
+  results_df = results_df  # The dataframe containing log2foldchange and p-values
+) + ylim(0, 10)  # Set the y-axis limits
+
+# Display the plot
+print(p_SEPHS2)
+
+# Save the plot to a PDF
+pdf(paste0(outdir, "/SEPHS2_enhancer_perturbation.pdf"), height = 6, width = 4)
+print(p_SEPHS2)
+dev.off()
+
+grid.arrange(p_SEPHS2, p_ITGAL, ncol = 2)
+# Hide axis labels and ticks on p_NCR3
+p_ITGAL <- p_ITGAL + theme(
+  axis.title.y = element_blank(),  # Remove y-axis title
+  axis.text.y = element_blank(),   # Remove y-axis text (numbers)
+  axis.ticks.y = element_blank()   # Remove y-axis ticks
+)
+
+# Arrange the two plots in a grid
+pdf(paste0(outdir, "/SEPHS2_ITGAL_enhancer_perturbation.pdf"), height = 6, width = 8)
+grid.arrange(p_SEPHS2, p_ITGAL, ncol = 2)
+dev.off()
+```
+for multiple grnas targets on the same gene target
+```{r}
+
+plot_response_grna_target_multiple_grnas <- function(sceptre_object, response_id, grna_targets, results_df) {
+  # Custom colors for each gRNA target and control
+  treatment_control_colors <- c(
+    "grna_target_1" = "#40c7f3",  # Color for the first gRNA target
+    "grna_target_2" = "#f8993d",  # Color for the second gRNA target
+    "grna_target_2" = "#f45842",
+    "grna_target_2" = "#9B7EBD",
+    "Non-targeting" = "gray80"    # Color for the control
+  )
+  
+  # You can then dynamically replace the names using `names()`
+  names(treatment_control_colors)[1] <- grna_targets[1]  # Assign first gRNA target color
+  names(treatment_control_colors)[2] <- grna_targets[2]  # Assign second gRNA target color
+  names(treatment_control_colors)[3] <- grna_targets[3]  # Assign second gRNA target color
+  names(treatment_control_colors)[4] <- grna_targets[4]  # Assign second gRNA target color
+
+  combined_data <- data.frame()
+
+  # Loop through the grna_targets
+  for (grna_target in grna_targets) {
+
+    # Extract the counts for this pair; filter for cells in use
+    response_matrix <- get_response_matrix(sceptre_object)
+    y <- response_matrix[response_id, sceptre_object@cells_in_use]
+
+    # Get the sequencing depths; filter for cells in use
+    response_n_umis <- sceptre_object@covariate_data_frame$response_n_umis[sceptre_object@cells_in_use]
+
+    # Compute the normalized counts
+    normalized_counts <- log(10000 * y / response_n_umis + 1)
+
+    # Get the treated cells and control cells
+    trt_cells <- normalized_counts[sceptre_object@grna_assignments$grna_group_idxs[[grna_target]]]
+    cntrl_cells <- normalized_counts[-sceptre_object@grna_assignments$grna_group_idxs[[grna_target]]]
+
+  # Construct the data frame for this gRNA target
+    to_plot <- data.frame(
+      normalized_count = c(trt_cells, cntrl_cells),
+      treatment = factor(c(rep(grna_target, length(trt_cells)), 
+                           rep("Non-targeting", length(cntrl_cells))),
+                         levels = c(grna_targets, "Non-targeting"))  # Ensure Non-targeting is last
+    )
+
+    # Add to the combined data
+    combined_data <- rbind(combined_data, to_plot)
+  }
+
+  # Plot the combined data
+  p_out <- ggplot(combined_data, aes(x = treatment, y = normalized_count, fill = treatment)) +
+    geom_violin(alpha = 0.6, color = "black", draw_quantiles = c(0.5)) +  # Add median line
+    #geom_boxplot(width = 0.1) +
+    theme_manuscript_default() +
+    ggtitle(paste(response_id)) +
+    ylab("Normalized Gene Expression") +
+    xlab("Treatment") +
+    theme(legend.position = "right") +
+    scale_fill_manual(values = treatment_control_colors)
+
+  # Add annotations for both grna_targets
+  for (grna_target in grna_targets) {
+    log2_fc <- results_df$log_2_fold_change[results_df$grna_target == grna_target & results_df$response_id == response_id]
+    p_val <- results_df$p_value[results_df$grna_target == grna_target & results_df$response_id == response_id]
+
+    annotation <- paste0(round(log2_fc, 2))
+    p_out <- p_out + annotate("text", x = (which(grna_targets == grna_target) - 1) * 2, y = 7.5, label = annotation, size = 3, hjust = 0.5)
+  }
+
+  return(p_out)
+}
+
+# Set up the parameters
+sceptre_object <- sceptre_obj_p14
+response_id <- "ITGAL"
+grna_targets <- c("chr16:30458439-30459329", "chr16:30470935-30471398","chr16:30472239-30472965" ,"chr16:30473298-30474032")
+
+# Generate the plot
+p_ITGAL <- plot_response_grna_target_multiple_grnas(
+  sceptre_object = sceptre_object,
+  response_id = response_id,
+  grna_targets = grna_targets,
+  results_df = results_df  # The dataframe containing log2foldchange and p-values
+) + ylim(0, 8)  # Set the y-axis limits
+
+# Display the plot
+print(p_ZNF768)
+
+p_SEPHS2 <- p_SEPHS2 +  theme_manuscript_default() + theme(legend.position = "none") 
+
+p_ITGAL <- p_ITGAL +  theme_manuscript_default() + theme(
+  axis.title.y = element_blank(),  # Remove y-axis title
+  axis.text.y = element_blank(),   # Remove y-axis text (numbers)
+  axis.ticks.y = element_blank(),  # Remove y-axis ticks
+  plot.margin = unit(c(1, 1, 1, 0.5), "cm")  # Adjust margin to balance spacing
+) + theme(legend.position = "none") 
+
+p_ZNF768 <- p_ZNF768 + theme_manuscript_default() + theme(
+  axis.title.y = element_blank(),  # Remove y-axis title
+  axis.text.y = element_blank(),   # Remove y-axis text (numbers)
+  axis.ticks.y = element_blank(),  # Remove y-axis ticks
+  plot.margin = unit(c(1, 1, 1, 0.5), "cm")  # Adjust margin to balance spacing
+) 
+
+# Use cowplot to align the plots
+aligned_plots <- plot_grid(p_SEPHS2, p_ITGAL, p_ZNF768, ncol = 3, align = "hv")
+
+
+# Save the plot to a PDF
+pdf(paste0(outdir, "/SEPHS2_ITGAL_ZNF768_enhancer_perturbation.pdf"), height =12, width =24)
+print(aligned_plots)
+dev.off()
+
+```
+
+
+
+# for multiple pairs not control
+```{r}
+plot_response_grna_target_multiple <- function(sceptre_object, response_grna_pairs, results_df) {
+  # Custom colors for each response_id's perturbation and control
+  treatment_control_colors <- c(
+    "NCR3-perturbation" = "#40c7f3",   # Color for NCR3 perturbation
+    "NCR3-control" = "gray80",         # Color for NCR3 control
+    "LTB-perturbation" = "#f8993d",    # Color for LTB perturbation
+    "LTB-control" = "gray80"           # Color for LTB control
+  )
+
+  combined_data <- data.frame()
+
+  # Loop through the response_grna_pairs
+  for (pair in response_grna_pairs) {
+    response_id <- pair$response_id
+    grna_target <- pair$grna_target
+
+    # Extract the counts for this pair; filter for cells in use
+    response_matrix <- get_response_matrix(sceptre_object)
+    y <- response_matrix[response_id, sceptre_object@cells_in_use]
+
+    # Get the sequencing depths; filter for cells in use
+    response_n_umis <- sceptre_object@covariate_data_frame$response_n_umis[sceptre_object@cells_in_use]
+
+    # Compute the normalized counts
+    normalized_counts <- log(10000 * y / response_n_umis + 1)
+
+    # Get the treated cells and control cells
+    trt_cells <- normalized_counts[sceptre_object@grna_assignments$grna_group_idxs[[grna_target]]]
+    cntrl_cells <- normalized_counts[-sceptre_object@grna_assignments$grna_group_idxs[[grna_target]]]
+
+    # Construct the data frame for this pair with separate controls
+    to_plot <- data.frame(
+      normalized_count = c(trt_cells, cntrl_cells),
+      treatment = factor(c(rep(paste0(response_id, "-perturbation"), length(trt_cells)), 
+                          rep(paste0(response_id, "-control"), length(cntrl_cells))),
+                        levels = c(paste0(response_id, "-perturbation"), paste0(response_id, "-control"))),
+      response_id = response_id  # Add a column for response_id
+    )
+
+    # Add to the combined data
+    combined_data <- rbind(combined_data, to_plot)
+  }
+
+  # Plot the combined data, using treatment for x-axis and coloring by response_id and control
+  p_out <- ggplot(combined_data, aes(x = treatment, y = normalized_count, fill = treatment)) +
+    geom_violin(alpha = 0.6, color = "black", draw_quantiles = c(0.5)) +  # Add median line
+   # geom_boxplot(width = 0.1) +
+    theme_manuscript_default() +
+    ggtitle("Response and gRNA Targets with Separate Controls") +
+    ylab("Normalized Gene Expression") +
+    xlab("Treatment") +
+    theme(legend.position = "none") +
+    scale_fill_manual(values = treatment_control_colors)
+
+  # Add annotations for both response-grna pairs
+  for (pair in response_grna_pairs) {
+    response_id <- pair$response_id
+    grna_target <- pair$grna_target
+
+    log2_fc <- results_df$log_2_fold_change[results_df$grna_target == grna_target & results_df$response_id == response_id]
+    p_val <- results_df$p_value[results_df$grna_target == grna_target & results_df$response_id == response_id]
+    
+    annotation <- paste0("Log2FC = ", round(log2_fc, 2), ", p-value = ", format(p_val, scientific = TRUE, digits = 2))
+    p_out <- p_out + annotate("text", x = 1.5 + (which(response_grna_pairs$response_id == response_id) - 1) * 2, 
+                              y = 7.5, label = annotation, size = 3, hjust = 0.5)
+  }
+
+  return(p_out)
+}
+
+# Set up the parameters
+sceptre_object <- sceptre_obj_p8
+
+# Define the pairs of response_id and grna_target
+response_grna_pairs <- list(
+  list(response_id = "NCR3", grna_target = "chr6:31567590-31568964"),
+  list(response_id = "LTB", grna_target = "chr6:31567590-31568964")
+)
+
+p_NCR3 <- p_NCR3 + theme(
+  axis.title.y = element_blank(),  # Remove y-axis title
+  axis.text.y = element_blank(),   # Remove y-axis text (numbers)
+  axis.ticks.y = element_blank(),  # Remove y-axis ticks
+  plot.margin = unit(c(1, 1, 1, 0.5), "cm")  # Adjust margin to balance spacing
+)
+
+# Use cowplot to align the plots
+aligned_plots <- plot_grid(p_LTB, p_NCR3, ncol = 2, align = "hv")
+
+
+# Save the plot to a PDF
+pdf(paste0(outdir, "/LTB_NCR3_enhancer_perturbation.pdf"), height = 6, width = 8)
+print(aligned_plots)
+dev.off()
+
+```
+
+per donor
+```{r}
+
+```
+```{r}
+plot_response_grna_target_pair_multi <- function(sceptre_objects, response_id, grna_target, donor_names, results_df) {
+  # Custom colors for gRNA targets and control
+  grna_target_colors <- c(
+    "JUND" = "#1f78b4", "SP140" = "#33a02c", "CAB39" = "#e31a1c", 
+    "PIM1" = "#ff7f00", "CCND2" = "#6a3d9a", "Control" = "gray80"
+  )
+  
+  all_data <- list()  # List to store data for each donor
+  annotations <- list()  # List to store log2foldchange and p-values for annotations
+  
+  # Loop through each donor's sceptre_object and extract data
+  for (i in seq_along(sceptre_objects)) {
+    # Extract current sceptre_object and donor name
+    sceptre_object <- sceptre_objects[[i]]
+    donor_name <- donor_names[i]
+    
+    # Extract the counts for this pair; filter for cells in use
+    response_matrix <- get_response_matrix(sceptre_object)
+    y <- response_matrix[response_id, sceptre_object@cells_in_use]
+
+    # Get the sequencing depths; filter for cells in use
+    response_n_umis <- sceptre_object@covariate_data_frame$response_n_umis[sceptre_object@cells_in_use]
+
+    # Compute the normalized counts
+    normalized_counts <- log(10000 * y / response_n_umis + 1)
+
+    # Get the treated cells and control cells
+    trt_cells <- normalized_counts[sceptre_object@grna_assignments$grna_group_idxs[[grna_target]]]
+    cntrl_cells <- normalized_counts[-sceptre_object@grna_assignments$grna_group_idxs[[grna_target]]]
+
+    # Construct the data frame for this donor
+    to_plot <- data.frame(
+      normalized_count = c(trt_cells, cntrl_cells),
+      treatment = factor(c(rep("Treatment", length(trt_cells)), rep("Control", length(cntrl_cells))), levels = c("Treatment", "Control")),
+      donor = donor_name
+    )
+
+    # Add the data for this donor to the list
+    all_data[[i]] <- to_plot
+
+    # Extract relevant statistics for annotation
+    log2_fc <- results_df$log_2_fold_change[results_df$grna_target == grna_target & results_df$response_id == response_id & results_df$sample == donor_name]
+    p_val <- results_df$p_value[results_df$grna_target == grna_target & results_df$response_id == response_id & results_df$sample == donor_name]
+
+    # Store the annotation for this donor
+    annotations[[i]] <- paste0("Donor ", donor_name, ": Log2FC = ", round(log2_fc, 2), ", p-value = ", format(p_val, scientific = TRUE, digits = 2))
+  }
+
+  # Combine data for all donors
+  combined_data <- do.call(rbind, all_data)
+
+  # Plot the combined data with separate violins for each donor and treatment
+  p_out <- ggplot(combined_data, aes(x = donor, y = normalized_count, fill = treatment)) +
+    geom_violin(alpha = 0.6, color = "black", draw_quantiles = c(0.5)) +  # Add median line
+    #stat_summary(fun = mean, geom = "point", shape = 18, size = 3, color = "black") +  # Indicate mean
+    theme_manuscript_default()+
+    ggtitle(paste("Response:", response_id, "\ngRNA target:", grna_target)) +
+    ylab("Normalized Gene Expression") +
+    xlab("Donor") +
+    theme(legend.position = "none") +
+    scale_fill_manual(values = c("Treatment" = grna_target_colors[[grna_target]], "Control" = grna_target_colors["Control"]))
+
+  # Add the annotations for each donor
+  for (i in seq_along(donor_names)) {
+    p_out <- p_out + annotate("text", x = i, y = max(combined_data$normalized_count) + 0.5, label = annotations[[i]], size = 3, hjust = 0.5)
+  }
+
+  return(p_out)
+}
+# List of gRNA targets and genes
+grna_targets <- c("JUND", "SP140", "CAB39", "PIM1", "CCND2")
+response_ids <- c("JUND", "SP140", "CAB39", "PIM1", "CCND2")
+
+# List of sceptre objects for donors A, B, and C
+sceptre_objects <- list(sceptre_obj_finished_A1, sceptre_obj_finished_B1, sceptre_obj_finished_C1)
+
+# Donor names
+donor_names <- c("A", "B", "C")
+
+# Empty list to store plots
+plot_list <- list()
+
+# Loop through each gene and gRNA target, generate plots, and store them in the list
+for (i in seq_along(grna_targets)) {
+  p <- plot_response_grna_target_pair_multi(
+    sceptre_objects = sceptre_objects,
+    response_id = response_ids[i],
+    grna_target = grna_targets[i],
+    donor_names = donor_names,
+    results_df = results_df  # The dataframe containing log2foldchange and p-values
+  ) +
+  ylim(0, 10)  # Set the y-axis limits for all plots
+  
+  # If it's not JUND, remove y-axis labels and title
+  if (grna_targets[i] != "JUND") {
+    p <- p + theme(
+      axis.title.y = element_blank(),
+      axis.text.y = element_blank(),
+      axis.ticks.y = element_blank()
+    )
+  }
+  
+  # Add each plot to the list
+  plot_list[[i]] <- p
+}
+
+# Combine all the plots into a grid, align them and ensure equal sizes
+final_plot_grid <- cowplot::plot_grid(
+  plotlist = plot_list, 
+  ncol = 5, 
+  align = "v",    # Align the plots vertically
+  axis = "tb"     # Keep the top and bottom axes consistent
+)
+
+# Display the final grid of plots
+print(final_plot_grid)
+
+
+pdf(paste0(outdir, "/multi_control_enhancer_perturbations.pdf"), height = 6, width = 10)
+final_plot_grid
+dev.off()
+```
+```{r}
+# Initialize a data frame to store mean normalized expressions
+mean_expr_df <- data.frame(
+  grna_target = character(),
+  donor = character(),
+  treatment = character(),
+  mean_normalized_expression = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each grna_target
+for (i in seq_along(grna_targets)) {
+  grna_target <- grna_targets[i]
+  response_id <- response_ids[i]
+  
+  # Loop through each donor
+  for (j in seq_along(sceptre_objects)) {
+    sceptre_object <- sceptre_objects[[j]]
+    donor_name <- donor_names[j]
+    
+    # Extract the counts for this pair; filter for cells in use
+    response_matrix <- get_response_matrix(sceptre_object)
+    y <- response_matrix[response_id, sceptre_object@cells_in_use]
+    
+    # Get the sequencing depths; filter for cells in use
+    response_n_umis <- sceptre_object@covariate_data_frame$response_n_umis[sceptre_object@cells_in_use]
+    
+    # Compute the normalized counts
+    normalized_counts <- log(10000 * y / response_n_umis + 1)
+    
+    # Get the indices of treated and control cells
+    treated_indices <- sceptre_object@grna_assignments$grna_group_idxs[[grna_target]]
+    control_indices <- setdiff(seq_along(normalized_counts), treated_indices)
+    
+    # Get the normalized counts for treated and control cells
+    trt_cells <- normalized_counts[treated_indices]
+    cntrl_cells <- normalized_counts[control_indices]
+    
+    # Calculate mean normalized expression for treatment and control
+    mean_trt <- mean(trt_cells)
+    mean_cntrl <- mean(cntrl_cells)
+    
+    # Store the results for treatment
+    mean_expr_df <- rbind(mean_expr_df, data.frame(
+      grna_target = grna_target,
+      donor = donor_name,
+      treatment = "Treatment",
+      mean_normalized_expression = mean_trt,
+      stringsAsFactors = FALSE
+    ))
+    
+    # Store the results for control
+    mean_expr_df <- rbind(mean_expr_df, data.frame(
+      grna_target = grna_target,
+      donor = donor_name,
+      treatment = "Control",
+      mean_normalized_expression = mean_cntrl,
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+# Calculate the CV across donors for each target and treatment
+cv_df <- mean_expr_df %>%
+  group_by(grna_target, treatment) %>%
+  summarise(
+    mean_of_means = mean(mean_normalized_expression),
+    sd_of_means = sd(mean_normalized_expression),
+    cv_percent = (sd_of_means / abs(mean_of_means)) * 100  # Use abs to handle negative means
+  ) %>%
+  ungroup()
+
+# View the CV Data Frame
+print(cv_df)
+
+```
+
+```{r}
+# Assuming results_df is your data frame
+#Filter for rows where significant == TRUE across all donors
+filtered_df <- results_df %>%
+  group_by(grna_target, response_id) %>%
+  filter(all(significant))  # Keeps only grna_target/response_id combos where significant is TRUE for all donors
+
+
+# Filter for groups where at least 2 donors show a significant effect, also tried 1 donor and taking the signifcance from combined
+filtered_df <- results_df %>%
+  group_by(grna_target, response_id) %>%
+  filter(sum(significant) >= 2) %>%
+  filter(grna_target !="CD4", grna_target !="CD28", grna_target !="CTLA4", grna_target !="CD81", grna_target !="IL2RA")
+
+# Create a new column to identify the donor based on the panel column
+filtered_df <- filtered_df %>%
+  mutate(donor = substr(sample, 1, 1))  # Extract first letter A, B, or C as donor identifier
+
+#Group by grna_target, response_id and calculate the mean, variance, and standard deviation
+donor_variation <- filtered_df %>%
+  group_by(grna_target, response_id) %>%
+  summarize(mean_log2FC = mean(log_2_fold_change, na.rm = TRUE),  # Mean log2 fold change
+            variance = var(log_2_fold_change, na.rm = TRUE),      # Variance
+            std_dev = sd(log_2_fold_change, na.rm = TRUE))        # Standard deviation
+
+#Calculate percentage variance and standard deviation relative to mean log2 fold change
+donor_variation <- donor_variation %>%
+  mutate(variance_percent = (variance / abs(mean_log2FC)) * 100,
+         std_dev_percent = (std_dev / abs(mean_log2FC)) * 100)
+
+# View both the actual values and percentages of variance and standard deviation
+print(donor_variation)
+
+# Summarize donor-to-donor variation across all genes
+# Calculate mean variance and standard deviation across all tested genes
+mean_variance <- mean(donor_variation$variance_percent, na.rm = TRUE)
+mean_std_dev <- mean(donor_variation$std_dev_percent, na.rm = TRUE)
+
+# calculate median
+median_variance <- median(donor_variation$variance_percent, na.rm = TRUE)
+median_std_dev <- median(donor_variation$std_dev_percent, na.rm = TRUE)
+
+# Print the summary statistics for percentages
+cat("Mean Percentage Variance across all genes:", mean_variance, "\n")
+cat("Mean Percentage Standard Deviation across all genes:", mean_std_dev, "\n")
+cat("Median Percentage Variance across all genes:", median_variance, "\n")
+cat("Median Percentage Standard Deviation across all genes:", median_std_dev, "\n")
+
+# Print the summary statistics for actual values (not percentages)
+mean_actual_variance <- mean(donor_variation$variance, na.rm = TRUE)
+mean_actual_std_dev <- mean(donor_variation$std_dev, na.rm = TRUE)
+
+cat("Mean Actual Variance across all genes:", mean_actual_variance, "\n")
+cat("Mean Actual Standard Deviation across all genes:", mean_actual_std_dev, "\n")
+```
+```{r}
+
+# #Filter significant combinations from the combined dataset
+# significant_combined <- results_df_all %>%
+#   filter(significant == TRUE) %>%  # Take only significant combinations from combined dataset
+#    filter(grna_target !="CD4", grna_target !="CD28", grna_target !="CTLA4", grna_target !="CD81", grna_target !="IL2RA") %>%
+#          select(grna_target, response_id)  # Select relevant columns for matching
+# 
+# #Filter the original dataset (individual donors) and match with significant combinations
+# filtered_df <- results_df %>%
+#   semi_join(significant_combined, by = c("grna_target", "response_id"))  # Match significant combinations from combined dataset
+# 
+# # Create a new column to identify the donor based on the panel column
+# filtered_df <- filtered_df %>%
+#   mutate(donor = substr(sample, 1, 1))  # Extract first letter A, B, or C as donor identifier
+# 
+# # Step 4: Group by grna_target, response_id and calculate the variance or standard deviation
+# donor_variation <- filtered_df %>% #filter(is_target==TRUE)%>%
+#   group_by(grna_target, response_id) %>%
+#   summarize(mean_log2FC = mean(log_2_fold_change, na.rm = TRUE),  # Mean log2 fold change
+#             variance = var(log_2_fold_change, na.rm = TRUE),      # Variance
+#             std_dev = sd(log_2_fold_change, na.rm = TRUE))        # Standard deviation
+# 
+# # Step 5: Calculate percentage variance and standard deviation relative to mean log2 fold change
+# donor_variation <- donor_variation %>%
+#   mutate(variance_percent = (variance / abs(mean_log2FC)) * 100,
+#          std_dev_percent = (std_dev / abs(mean_log2FC)) * 100)
+# 
+# #  View both the actual values and percentages of variance and standard deviation
+# print(donor_variation)
+# 
+# #Summarize donor-to-donor variation across all genes
+# # Calculate mean variance and standard deviation across all tested genes
+# mean_variance <- mean(donor_variation$variance_percent, na.rm = TRUE)
+# mean_std_dev <- mean(donor_variation$std_dev_percent, na.rm = TRUE)
+# 
+# #calculate median
+# median_variance <- median(donor_variation$variance_percent, na.rm = TRUE)
+# median_std_dev <- median(donor_variation$std_dev_percent, na.rm = TRUE)
+# 
+# # Print the summary statistics for percentages
+# cat("Mean Percentage Variance across all genes:", mean_variance, "\n")
+# cat("Mean Percentage Standard Deviation across all genes:", mean_std_dev, "\n")
+# cat("Median Percentage Variance across all genes:", median_variance, "\n")
+# cat("Median Percentage Standard Deviation across all genes:", median_std_dev, "\n")
+# 
+# #Print the summary statistics for actual values (not percentages)
+# mean_actual_variance <- mean(donor_variation$variance, na.rm = TRUE)
+# mean_actual_std_dev <- mean(donor_variation$std_dev, na.rm = TRUE)
+# 
+# cat("Mean Actual Variance across all genes:", mean_actual_variance, "\n")
+# cat("Mean Actual Standard Deviation across all genes:", mean_actual_std_dev, "\n")
+# 
+
+
+
+variation<- ggplot(donor_variation, aes(x = factor(1), y = std_dev_percent)) +
+   geom_violin(trim = FALSE, fill = "#bbcfeb", color = "black", alpha=0.3) +  # Create the violin plot
+  geom_boxplot(trim = FALSE, fill = "#557ebf", color = "black", alpha=0.7) +  # Create the violin plot
+ # geom_jitter(width = 0.1, color = "#bbcfeb", alpha = 0.3) +  # Add individual data points
+ # stat_summary(fun = median, geom = "hline", aes(yintercept = ..y..), 
+             #  linetype = "dashed", color = "red", linewidth = 1.2) +  # Add median line
+  #stat_summary(fun = mean, geom = "hline", aes(yintercept = ..y..), 
+              # linetype = "solid", color = "blue", linewidth = 1.2) +  # Add mean line
+  labs(title = "Distribution of Percentage standard deviation Across Donors",
+       x = "All Combinations",
+       y = "Percentage standard deviation") +
+  theme_manuscript_default()+
+ scale_y_continuous(limits = c(0, 200), oob = squish)
+ # scale_y_log10()  # Log scale for the y-axis
+variation
+
+pdf(paste0(outdir, "/variation_sig2_clipped200.pdf"), height = 6, width = 4)
+variation
+dev.off()
+```
+
+
+
+```{r}
+
+
+# category_colors <- c("distal"="#daa520", "indirect"="#0263a3", 
+#                      "target_gene_body"="#4299d4", "target_gene_promoter"="#C96868", 
+#                      "trans"="#9ad8fc", 
+#                     "distal_promoter_non_significant" = "#9B7516")
+category_colors <- c("distal"="#f45842", 
+                     "indirect"="#fab7ae", 
+                     "target_gene_body"="#93b9f8", 
+                     "target_gene_promoter"="#4285f4", 
+                     "trans"="#9B7EBD", 
+                     "distal_promoter_non_significant"="#f56f5d")
+
+# Create significant_edges as usual
+significant_edges <- results_df %>%
+  filter(significant == TRUE & ctrl_perturbation == FALSE, abs(log_2_fold_change) >=0.1) %>%
+  select(grna_target, response_id, interaction_type, log_2_fold_change, significant, TF, cytokines, cyt_receptor, is_checkpoint)
+
+# Your code for other steps can go here if needed...
+
+# Recategorization Logic Starts Here:
+
+# Step 1: Filter for distal interactions
+indirect_interactions <- significant_edges %>%
+  filter(interaction_type == "indirect")
+
+# Step 2: Find grna_targets that also have target_gene_promoter interactions
+# but only if all target_gene_promoter interactions are significant == FALSE
+non_significant_promoter <- results_df %>%
+  filter(interaction_type == "target_gene_promoter") %>%
+  group_by(grna_target) %>%
+  summarize(all_promoter_false = all(significant == FALSE))
+
+# Step 3: Join this info with the distal interactions
+# Keep only distal interactions where the corresponding grna_target has only non-significant promoter interactions
+recategorized_indirect <- indirect_interactions %>%
+  inner_join(non_significant_promoter, by = "grna_target") %>%
+  filter(all_promoter_false == TRUE)
+
+# Step 4: Recategorize these interactions (you can decide the new interaction type name)
+# Example: Recategorizing interaction_type to "distal_promoter_non_significant"
+recategorized_distal <- recategorized_indirect %>%
+  mutate(interaction_type = "distal_promoter_non_significant")
+
+# Step 5: Merge back into the main dataframe to keep the changes
+significant_edges <- significant_edges %>%
+  left_join(recategorized_distal %>% select(grna_target, response_id, interaction_type), 
+            by = c("grna_target", "response_id"), suffix = c("", "_new")) %>%
+  mutate(interaction_type = ifelse(!is.na(interaction_type_new), interaction_type_new, interaction_type)) %>%
+  select(-interaction_type_new)
+
+# # Plotting section:
+# # Plot the graph using the updated category colors
+# plot(interaction_graph, 
+#      #layout = layout_fr_separated,  # Use the modified layout with separated clusters
+#      vertex.size = 5, 
+#      vertex.label.cex = 1, 
+#      vertex.label.color = "black", 
+#      edge.color = category_colors[significant_edges$interaction_type],  # Use updated category colors
+#      edge.width = E(interaction_graph)$width)
+# 
+# # Step 11: Add a much smaller legend and position it further away
+# legend("bottomright",  # Move the legend to the bottom right corner
+#        legend = c("grna_target", "response_id", names(category_colors)),  # Add the interaction types
+#        col = c("#f45842", "#4285f4", category_colors), 
+#        pch = 16,  # Circle for node legends
+#        pt.cex = 0.7,  # Even smaller points in the legend
+#        cex = 0.5,  # Make the legend text much smaller
+#        bty = "n",  # Remove the box around the legend
+#        title = "Node and Edge Colors")
+
+# Now the grna_target - response_id pairs with interaction_type "distal" 
+# and non-significant target_gene_promoter interactions are recategorized.
+
+```
+
+```{r}
+# # # Step 1: Filter for significant interactions and exclude control perturbations
+#  significant_edges <- results_df %>%
+#    filter(significant == TRUE & ctrl_perturbation == FALSE) %>%
+#    select(grna_target, response_id, interaction_type, log_2_fold_change)  # Include log_2_fold_change for edge thickness
+
+# Step 2: Count how many genes each grna_target is connected to (more than 1 gene)
+target_gene_counts <- significant_edges %>%
+  group_by(grna_target) %>%
+  summarize(gene_count = n(), .groups = 'drop')
+
+# Step 3: Count how many grna_targets each gene is connected to (more than 1 enhancer)
+gene_target_counts <- significant_edges %>%
+  group_by(response_id) %>%
+  summarize(target_count = n(), .groups = 'drop')
+
+ # Step 4: Filter out 1:1 interactions
+ # Keep only the interactions where both grna_target and response_id have more than 1 connection
+ filtered_edges <- significant_edges %>%
+   inner_join(target_gene_counts, by = "grna_target") %>%
+   inner_join(gene_target_counts, by = "response_id") #%>%
+#   filter(gene_count > 1 & target_count > 1)  # Keep only interactions that are not 1:1
+
+# Step 5: Create the graph from the filtered edge list
+ # Step 5: Create the graph from the filtered edge list
+interaction_graph <- graph_from_data_frame(
+  d = filtered_edges[, c("grna_target", "response_id")],  # Use only source (grna_target) and target (response_id) for edges
+  directed = TRUE
+)
+
+# Step 6: Add your custom colors for nodes (grna_target vs. response_id)
+# Color nodes: #f45842 for grna_target, #4285f4 for response_id
+#V(interaction_graph)$color <- ifelse(V(interaction_graph)$name %in% filtered_edges$response_id, "#4285f4", "#f45842")
+#V(interaction_graph)$color <- ifelse(V(interaction_graph)$name %in% filtered_edges$response_id, "#9ecae1", "#c3645c")
+#V(interaction_graph)$color <- ifelse(V(interaction_graph)$name %in% filtered_edges$response_id, "grey30", "grey80")
+# Map TF and Cytokine information to response_id
+# Assuming cyt_receptor and is_checkpoint columns are already added in `filtered_edges`
+tf_map <- setNames(filtered_edges$TF, filtered_edges$response_id)
+cytokine_map <- setNames(filtered_edges$cytokines, filtered_edges$response_id)
+receptor_map <- setNames(filtered_edges$cyt_receptor, filtered_edges$response_id)
+checkpoint_map <- setNames(filtered_edges$is_checkpoint, filtered_edges$response_id)
+
+# Assign colors based on grna_target, TF, Cytokine, Receptor, and Checkpoint status for each response_id
+V(interaction_graph)$color <- ifelse(
+  V(interaction_graph)$name %in% filtered_edges$grna_target,
+  "grey80", # Color for grna_target
+  ifelse(
+    V(interaction_graph)$name %in% names(tf_map) & tf_map[V(interaction_graph)$name] == TRUE,
+    "#fc8d62", # Color for TFs
+    ifelse(
+      V(interaction_graph)$name %in% names(cytokine_map) & cytokine_map[V(interaction_graph)$name] == TRUE,
+      "#E41A1C", # Color for Cytokines
+      ifelse(
+        V(interaction_graph)$name %in% names(receptor_map) & receptor_map[V(interaction_graph)$name] == TRUE,
+        "#377EB8", # Color for Cytokine Receptors
+        ifelse(
+          V(interaction_graph)$name %in% names(checkpoint_map) & checkpoint_map[V(interaction_graph)$name] == TRUE,
+          "#4DAF4A", # Color for Immune Checkpoints
+          "grey30" # Default color for other nodes
+        )
+      )
+    )
+  )
+)
+
+
+
+ # # Step 7: Use your custom color scheme for each unique interaction_type
+ # category_colors <- c("distal"="#f45842", "indirect"="#f89f93", 
+ #                      "target_gene_body"="#93b9f8", "target_gene_promoter"="#4285f4", 
+ #                      "trans"="#9B7EBD")
+# # c("distal"="#daa520", "indirect"="#0263a3", 
+# #                      "target_gene_body"="#4299d4", "target_gene_promoter"="#6ebff5", 
+# #                      "trans"="#9ad8fc")
+# Calculate the degree (number of connections) for each node
+node_degrees <- degree(interaction_graph)
+
+#Only show labels for response_id nodes that have more than 1 connection (degree > 1)
+V(interaction_graph)$label <- ifelse(V(interaction_graph)$name %in% significant_edges$response_id & node_degrees > 1,
+                                    V(interaction_graph)$name,
+                                    NA)
+
+
+# Assign edge colors based on the interaction_type using your color scheme
+E(interaction_graph)$color <- category_colors[filtered_edges$interaction_type]
+
+# Step 8: Use log_2_fold_change to set edge thickness based on absolute values
+E(interaction_graph)$width <- abs(filtered_edges$log_2_fold_change) * 4  # Scale edge thickness
+
+# Step 9: Filter out clusters with only 1 or 2 nodes (i.e., keep clusters with more than 2 nodes)
+# Find clusters (connected components)
+clusters <- components(interaction_graph)
+
+# Keep only the clusters with more than 2 nodes
+large_clusters <- which(clusters$csize > 2)
+
+# Subset the graph to keep only the large clusters
+interaction_graph <- induced_subgraph(interaction_graph, which(clusters$membership %in% large_clusters))
+
+# Step 10: Plot the filtered graph with colored nodes and edges
+# Remove grna_target names from the plot labels, keep gene names
+#V(interaction_graph)$label <- ifelse(V(interaction_graph)$name %in% filtered_edges$response_id, V(interaction_graph)$name, NA)
+
+# Fruchterman-Reingold layout with increased repulsion
+layout_fr <- layout_with_fr(interaction_graph, niter = 3000)  # Increase niter for more relaxed layout
+# layout_kk <- layout_with_kk(interaction_graph)
+# layout_sphere <- layout_on_sphere(interaction_graph)
+# layout_grid <- layout_on_grid(interaction_graph)
+
+
+
+
+pdf(paste0(outdir, "/interaction_graph_clusters_with_proteinclass_LFC0.1.pdf"), height =12, width = 12)
+
+# Plot the graph with node and edge coloring, including edge thickness based on log_2_fold_change
+plot(interaction_graph, 
+     layout = layout_fr,
+     vertex.size = 2, 
+     vertex.label.cex = 0.8, 
+     vertex.label.dist = 0.3,  # Set the distance of the label from the node
+     vertex.label.degree = -pi/2,
+     vertex.label.color = "grey20", 
+      edge.arrow.size = 0,
+     edge.color = E(interaction_graph)$color,  # Use edge colors based on your custom scheme
+     edge.width = E(interaction_graph)$width) + theme_manuscript_default() # Adjust edge thickness based on log_2_fold_change
+
+# Step 11: Add a much smaller legend and position it further away
+legend("bottomright",  # Move the legend to the bottom right corner
+       legend = c("grna_target", "response_id", names(category_colors)),  # Add the interaction types
+       col = c("grey80", "grey30", category_colors), 
+       pch = 16,  # Circle for node legends
+       pt.cex = 0.8,  # Even smaller points in the legend
+       cex = 0.5,  # Make the legend text much smaller
+       bty = "n",  # Remove the box around the legend
+       title = "Node and Edge Colors")
+
+dev.off()
+
+
+
+```
+
+look at a single cluster
+```{r}
+# Step 1: Find the clusters (connected components) in the graph
+clusters_info <- clusters(interaction_graph)
+
+# Step 2: Identify which cluster contains ITGAL
+# Find the membership index of ITGAL
+itgal_cluster <- clusters_info$membership[V(interaction_graph)$name == "ITGAL"]
+phf19_cluster <- clusters_info$membership[V(interaction_graph)$name == "PHF19"]
+tnfrsf14_cluster <- clusters_info$membership[V(interaction_graph)$name == "TNFRSF14"]
+tnpo3_cluster <- clusters_info$membership[V(interaction_graph)$name == "TNPO3"]
+ttyh2_cluster<-clusters_info$membership[V(interaction_graph)$name == "TTYH2"]
+il13_cluster<-clusters_info$membership[V(interaction_graph)$name == "IL13"]
+znf768_cluster<-clusters_info$membership[V(interaction_graph)$name == "ZNF768"]
+
+# Step 3: Subset the graph to keep only the cluster that contains ITGAL
+cluster_graph <- induced_subgraph(interaction_graph, which(clusters_info$membership == itgal_cluster))
+
+#layout_fr_small <- layout_with_fr(interaction_graph, niter = 10000)  # Increase niter for more relaxed layout
+# Step 4: Plot the ITGAL cluster separately
+pdf(paste0(outdir, "/interaction_graph_itgal_cluster_with_proteinclass_LFC0.1.pdf"), height =6, width = 6)
+plot(cluster_graph, 
+     #layout = layout_fr_small, 
+     vertex.size =3.5, 
+     vertex.label.dist =0.5,  # Set the distance of the label from the node
+     vertex.label.degree = -pi/2,
+     vertex.label.cex = 0.7, 
+     vertex.label.color = "grey20",  # Set label color to black
+      edge.arrow.size = 0,
+     edge.color = E(cluster_graph)$color,  # Use edge colors based on your scheme
+     edge.width = E(cluster_graph)$width) + # Adjust edge thickness based on log_2_fold_change 
+    theme_manuscript_default()
+
+dev.off()
+```
+overlap promoter perturbation genes with CRE
+
+```{r}
+# Step 1: Identify promoter-associated grna_targets and mark them as a separate 'promoter' category
+promoter_targets <- significant_edges %>%
+  filter(interaction_type == "target_gene_promoter") %>%
+  select(grna_target, response_id)  # Identify original grna_target and associated promoter (response_id)
+
+# Step 2: Replace all interactions of each grna_target associated with a promoter
+# For each grna_target targeting a promoter, reassign all connections to the promoter, retaining other targets as well.
+replaced_edges <- significant_edges %>%
+  left_join(promoter_targets, by = "grna_target", suffix = c("", "_promoter")) %>%
+  mutate(
+    grna_target = ifelse(!is.na(response_id_promoter), response_id_promoter, grna_target),
+    category = case_when(
+      !is.na(response_id_promoter) ~ "promoter",   # Mark original promoters
+      TRUE ~ "response_id"                         # Default for non-promoters
+    )
+  ) %>%
+  select(-response_id_promoter)  # Remove helper column
+
+# Step 3: Remove original enhancer-to-promoter links and retain all response_id connections
+replaced_edges <- replaced_edges %>%
+  filter(interaction_type != "target_gene_promoter")
+
+# Step 4: Proceed with filtering and graph creation using replaced_edges
+# Count how many genes each grna_target is connected to
+target_gene_counts <- replaced_edges %>%
+  group_by(grna_target) %>%
+  summarize(gene_count = n(), .groups = 'drop')
+
+# Count how many grna_targets each gene is connected to
+gene_target_counts <- replaced_edges %>%
+  group_by(response_id) %>%
+  summarize(target_count = n(), .groups = 'drop')
+
+# Step 5: Filter out 1:1 interactions
+filtered_edges <- replaced_edges %>%
+  inner_join(target_gene_counts, by = "grna_target") %>%
+  inner_join(gene_target_counts, by = "response_id")
+
+# Step 6: Create the graph from the filtered edge list
+interaction_graph <- graph_from_data_frame(
+  d = filtered_edges[, c("grna_target", "response_id")],  
+  directed = TRUE
+)
+
+# Step 7: Assign colors based on the new category
+# Create a map to differentiate promoters from regular response_id nodes
+# Ensure mappings are set for TF, Cytokine, Receptor, and Checkpoint status
+promoter_nodes <- unique(promoter_targets$response_id)
+tf_map <- setNames(filtered_edges$TF, filtered_edges$response_id)
+cytokine_map <- setNames(filtered_edges$cytokines, filtered_edges$response_id)
+receptor_map <- setNames(filtered_edges$cyt_receptor, filtered_edges$response_id)
+checkpoint_map <- setNames(filtered_edges$is_checkpoint, filtered_edges$response_id)
+
+# Assign colors for nodes based on their category: grna_target, promoter, response_id, and additional categories
+# Assign colors for nodes based on their category: grna_target, promoter, response_id, and additional properties
+V(interaction_graph)$color <- ifelse(
+  V(interaction_graph)$name %in% filtered_edges$grna_target & !(V(interaction_graph)$name %in% promoter_nodes),
+  "grey80",  # Color for non-promoter grna_targets (enhancers)
+  ifelse(
+    V(interaction_graph)$name %in% promoter_nodes | V(interaction_graph)$name %in% filtered_edges$response_id, 
+    ifelse(
+      V(interaction_graph)$name %in% names(tf_map) & tf_map[V(interaction_graph)$name] == TRUE, 
+      "#fc8d62",  # Color for Transcription Factors
+      ifelse(
+        V(interaction_graph)$name %in% names(cytokine_map) & cytokine_map[V(interaction_graph)$name] == TRUE,
+        "#E41A1C",  # Color for Cytokines
+        ifelse(
+          V(interaction_graph)$name %in% names(receptor_map) & receptor_map[V(interaction_graph)$name] == TRUE,
+          "#377EB8",  # Color for Cytokine Receptors
+          ifelse(
+            V(interaction_graph)$name %in% names(checkpoint_map) & checkpoint_map[V(interaction_graph)$name] == TRUE,
+            "#4DAF4A",  # Color for Immune Checkpoints
+            "grey30"  # Default color for other response_id and promoter nodes
+          )
+        )
+      )
+    ),
+    "grey30"  # Default color for nodes that don't fit other categories
+  )
+)
+
+
+
+# Step 8: Assign edge colors and widths for plotting
+E(interaction_graph)$color <- category_colors[filtered_edges$interaction_type]
+E(interaction_graph)$width <- abs(filtered_edges$log_2_fold_change) * 4
+E(interaction_graph)$width[is.na(E(interaction_graph)$width)] <- 1  # Handle NA values
+
+# Step 9: Filter clusters with 3 or more nodes after all modifications
+clusters <- components(interaction_graph)
+large_clusters <- which(clusters$csize >= 3)
+interaction_graph <- induced_subgraph(interaction_graph, which(clusters$membership %in% large_clusters))
+
+# # Step 10: Set labels only for response_id nodes and remove grna_target labels, >1 node
+# V(interaction_graph)$label <- ifelse(
+#   degree(interaction_graph, mode = "all") > 1 & 
+#   (V(interaction_graph)$name %in% filtered_edges$response_id | V(interaction_graph)$name %in% promoter_nodes),
+#   V(interaction_graph)$name, 
+#   NA
+# )
+
+# # Set labels for all nodes that are either response_id or promoters, leaving grna_target labels as NA
+V(interaction_graph)$label <- ifelse(
+  V(interaction_graph)$name %in% filtered_edges$response_id | V(interaction_graph)$name %in% promoter_nodes,
+  V(interaction_graph)$name,
+  NA
+)
+# Step 11: Create layout and set edge arrow sizes proportional to edge width
+layout_fr <- layout_with_fr(interaction_graph, niter = 3000)
+edge_arrow_size <- E(interaction_graph)$width * 0.1
+
+# Step 12: Plot the graph
+pdf(paste0(outdir, "/interaction_graph_promoter_overlay_withproteinclass_namesLCF0.1.pdf"), height = 12, width = 12)
+plot(interaction_graph, 
+     layout = layout_fr,
+     vertex.size = 2, 
+     vertex.label.cex = 0.8, 
+     vertex.label.dist = 0.3,  
+     vertex.label.degree = -pi/2,
+     vertex.label.color = "grey20", 
+     edge.arrow.size = edge_arrow_size, 
+     edge.color = E(interaction_graph)$color,  
+     edge.width = E(interaction_graph)$width)
+
+legend("bottomright", 
+       legend = c("grna_target", "promoter", "response_id", names(category_colors)), 
+       col = c("grey80", "grey30", "grey30", category_colors), 
+       pch = 16, 
+       pt.cex = 0.8,  
+       cex = 0.5,  
+       bty = "n",  
+       title = "Node and Edge Colors") + theme_manuscript_default()
+
+dev.off()
+
+
+
+```
+
+single cluster after promoter change
+```{r}
+# Step 1: Find the clusters (connected components) in the graph
+clusters_info <- clusters(interaction_graph)
+
+# Step 2: Identify which cluster contains ITGAL
+# Find the membership index of ITGAL
+itgal_cluster <- clusters_info$membership[V(interaction_graph)$name == "ITGAL"]
+phf19_cluster <- clusters_info$membership[V(interaction_graph)$name == "PHF19"]
+tnfrsf14_cluster <- clusters_info$membership[V(interaction_graph)$name == "TNFRSF14"]
+tnpo3_cluster <- clusters_info$membership[V(interaction_graph)$name == "TNPO3"]
+ttyh2_cluster<-clusters_info$membership[V(interaction_graph)$name == "TTYH2"]
+il13_cluster<-clusters_info$membership[V(interaction_graph)$name == "IL13"]
+znf768_cluster<-clusters_info$membership[V(interaction_graph)$name == "ZNF768"]
+rbm17_cluster<-clusters_info$membership[V(interaction_graph)$name == "RBM17"]
+il2ra_cluster<-clusters_info$membership[V(interaction_graph)$name == "IL2RA"]
+ctla4_cluster<-clusters_info$membership[V(interaction_graph)$name == "CTLA4"]
+trib1_cluster<-clusters_info$membership[V(interaction_graph)$name == "TRIB1"]
+lrrc32_cluster<-clusters_info$membership[V(interaction_graph)$name == "LRRC32"]
+# Step 3: Subset the graph to keep only the cluster that contains ITGAL
+cluster_graph <- induced_subgraph(interaction_graph, which(clusters_info$membership == lrrc32_cluster))
+
+#layout_fr_small <- layout_with_fr(interaction_graph, niter = 10000)  # Increase niter for more relaxed layout
+# Step 4: Plot the ITGAL cluster separately
+pdf(paste0(outdir, "/interaction_graph_lrrc32_cluster_promoter_overlay_with_proteinclass_names_LFC0.1.pdf"), height =6, width = 6)
+plot(cluster_graph, 
+     #layout = layout_fr_small, 
+     vertex.size =3.5, 
+     vertex.label.dist =0.5,  # Set the distance of the label from the node
+     vertex.label.degree = -pi/2,
+     vertex.label.cex = 0.7, 
+     vertex.label.color = "grey20",  # Set label color to black
+      edge.arrow.size = edge_arrow_size,
+     edge.color = E(cluster_graph)$color,  # Use edge colors based on your scheme
+     edge.width = E(cluster_graph)$width) + # Adjust edge thickness based on log_2_fold_change 
+    theme_manuscript_default()
+
+dev.off()
+```
+
+

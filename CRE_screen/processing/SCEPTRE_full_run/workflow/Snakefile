@@ -1,0 +1,65 @@
+configfile: "config/config_DM.yml"
+
+rule all:
+    input:
+        expand("results/{group}/sceptre_results.html", group=config["sample_groups"].keys()),
+        expand("results/{group}/doublets_filtered.csv", group=config["sample_groups"].keys())
+
+rule create_merged_seurat:
+  input:
+    seurat_files=lambda wildcards: [
+        config["samples"][sample]["seurat"]
+        for sample in config["sample_groups"][wildcards.group]["samples"]
+    ],
+    covars="resources/covariates.csv",
+    target_genes="resources/target_gene_panels.tsv"
+  params:
+    doublet_rate=lambda wildcards: [
+        config["doublet_rate"][sample]["multiplet_rate"]
+        for sample in config["sample_groups"][wildcards.group]["samples"]
+    ]
+  output:
+    merged_seurat = "results/{group}/merged_seurat.rds",
+    doublets_filtered = "results/{group}/doublets_filtered.csv"
+  script:
+    "scripts/create_merged_seurat.R"
+
+rule create_sceptre_input:
+  input: 
+    seurat = "results/{group}/merged_seurat.rds",
+    guides = lambda wildcards: config["sample_groups"][wildcards.group]["guides"],
+    covars = "resources/covariates.csv",
+    target_genes = "resources/target_gene_panels.tsv"
+  output: "results/{group}/sceptre_obj.rds"
+  params:
+    target_genes_only = True
+  script:
+    "scripts/create_sceptre_input.R"
+
+rule run_sceptre:
+  input:
+    sceptre = "results/{group}/sceptre_obj.rds",
+    genes = "resources/gene_tss.tsv"
+  output:
+    results = "results/{group}/discovery_results.tsv",
+    results_rds = "results/{group}/all_sceptre_output/results_run_discovery_analysis.rds",
+    guides_plot = "results/{group}/gRNA_assignment_mixture.pdf",
+    covars_plot = "results/{group}/covariate_distribution.pdf",
+    qc_plot = "results/{group}/qc_analyses.pdf",
+    calibration_plot = "results/{group}/calibration_check.pdf",
+    power_plot = "results/{group}/power_check.pdf",
+    discovery_plot = "results/{group}/discovery_results.pdf",
+    sceptre_obj_finished= "results/{group}/sceptre_obj_finished.rds"
+  params:
+    max_dist = None,
+    parallel = False
+  script:
+    "scripts/run_sceptre.R"
+
+rule visualize_sceptre_results:
+  input: 
+    results = "results/{group}/discovery_results.tsv",
+    genes = "resources/gene_tss.tsv"
+  output: "results/{group}/sceptre_results.html"
+  script:
+    "scripts/visualize_sceptre_results.Rmd"

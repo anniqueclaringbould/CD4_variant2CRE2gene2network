@@ -1,0 +1,301 @@
+---
+title: "Enhancer-Promoter Network Analysis"
+author: "Dewi Moonen"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r}
+# set output html chunk options
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+
+```{r attachPackages}
+library(tidyverse)
+library(cowplot)
+library(ggpubr)
+library(igraph)
+library(dplyr)
+library(scales)
+library(stringr)
+library(tibble)
+library(tidygraph)
+library(ggraph)
+library(grid)
+
+select <- dplyr::select
+rename <- dplyr::rename
+count <- dplyr::count
+slice <- dplyr::slice
+map <- purrr::map
+mutate <- dplyr::mutate
+filter<-dplyr::filter
+first <-dplyr::first
+components <-igraph::components
+degree <-igraph::degree
+simplify <-igraph::simplify
+source("/g/steinmetz/moonen/Rstudio/theme_manuscript_default.R")
+
+```
+
+load data
+```{r}
+etp<-read_csv("/g/steinmetz/moonen/Rstudio/cre_perturbation_screen_results_traits.csv")
+
+
+folder_path <- "/g/stegle/schrod/code/TCell/pseudobulk_deseq2_chunks50_min3bulks_ribosomal"
+discovery_P <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE) %>%
+  map_df(read_csv)
+
+discovery_P <- discovery_P %>% mutate(grna_target = contrast, gene_symbol = variable, log_2_fold_change = log_fc, pvals_adj = adj_p_value) %>% filter(pvals_adj <=0.1 , abs(log_2_fold_change) >= 0.1)
+
+pos_neg_genes <- discovery_P%>%
+  filter(gene_symbol == grna_target, 
+    !is.na(log_2_fold_change),
+    log_2_fold_change < 0) %>%
+  pull(gene_symbol) %>%
+  unique()
+
+```
+
+
+```{r}
+
+max_steps <- 0                 # plotted chaining depth (0 = off)
+max_steps_for_size <- 1        # sizing chaining depth (set to 1 as requested)
+
+edge_alpha <- 0.45             # <-- set edge transparency here (0..1)
+
+class_levels <- c("promoter-proximal", "promoter-distal", "intragenic-proximal",
+                  "intragenic-distal","intergenic-distal")
+
+color_map <- c(
+  CRE          ="#e57373",
+  gene         = "#334068",
+  pos_neg_gene = "#334068"
+)
+
+# Highlighted CRE fill (enhancer_like TRUE and distToTSS_bin != "> 1Mb")
+cre_hi_fill <- "#c03a30"
+
+# Edge colors by sign of LFC
+edge_col_up   <- "#f68b41"
+edge_col_down <- "#008080"
+
+# Genes whose labels are red + bold
+highlight_genes <- c("TNF","DLG1","ACTG1","PDCD6IP","SRF","EXT1","CSK")
+
+# --- build chaining edges up to N hops (same logic as your original) ---
+build_chain_edges <- function(max_steps, frontier_start, map_dp) {
+  edges_chain <- tibble(from=character(), to=character(), log2fc=numeric(),
+                        edge_type=character(), edge_class=character())
+  if (max_steps <= 0) return(edges_chain)
+
+  frontier <- frontier_start %>% distinct(from = to)
+  seen <- frontier$from
+
+  for (d in seq_len(max_steps)) {
+    step <- frontier %>%
+      inner_join(map_dp, by = c("from" = "grna_target")) %>%
+      transmute(
+        from,
+        to         = gene_symbol,
+        log2fc     = log_2_fold_change,
+        edge_type  = "dp_chain",
+        edge_class = NA_character_
+      ) %>%
+      distinct()
+
+    if (nrow(step) == 0) break
+    edges_chain <- bind_rows(edges_chain, step)
+
+    new_nodes <- setdiff(step$to, seen)
+    if (length(new_nodes) == 0) break
+
+    frontier <- tibble(from = new_nodes)
+    seen <- union(seen, new_nodes)
+  }
+  edges_chain
+}
+
+# --- 1) Filter ETP and create CRE -> primary gene edges ---
+es_pairs <- etp %>%
+  filter(str_detect(trait, "Celiac_disease")) %>%
+  filter(
+    pert_chr == gene_chr,
+    !ctrl_perturbation,
+    significant
+  ) %>%
+  transmute(
+    cre              = grna_target,
+    primary_gene     = response_id,
+    interaction_type = factor(interaction_type, levels = class_levels),
+    effect_size      = log_2_fold_change
+  ) %>%
+  distinct()
+
+edges1 <- es_pairs %>%
+  transmute(
+    from       = cre,
+    to         = primary_gene,
+    log2fc     = effect_size,
+    edge_type  = "CRE_to_gene",
+    edge_class = as.character(interaction_type)
+  )
+
+# --- 2) Primary gene -> downstream gene edges from discovery_P ---
+map_dp <- discovery_P %>%
+  select(grna_target, gene_symbol, log_2_fold_change) %>%
+  distinct()
+
+edges2 <- es_pairs %>%
+  inner_join(map_dp, by = c("primary_gene" = "grna_target")) %>%
+  transmute(
+    from       = primary_gene,
+    to         = gene_symbol,
+    log2fc     = log_2_fold_change,
+    edge_type  = "gene_to_gene",
+    edge_class = NA_character_
+  ) %>%
+  distinct()
+
+# --- 3) Optional chaining for PLOTTED graph ---
+edges_chain_plot <- build_chain_edges(
+  max_steps = max_steps,
+  frontier_start = edges2,
+  map_dp = map_dp
+)
+
+# --- 3b) Chaining for SIZING graph (always 1 hop as requested) ---
+edges_chain_size <- build_chain_edges(
+  max_steps = max_steps_for_size,
+  frontier_start = edges2,
+  map_dp = map_dp
+)
+
+# --- 4) Combine edges for plotted graph and build graph ---
+edge_list <- bind_rows(edges1, edges2, edges_chain_plot) %>%
+  filter(from != to) %>%
+  distinct(from, to, .keep_all = TRUE)
+
+nodes <- tibble(name = unique(c(edge_list$from, edge_list$to))) %>%
+  mutate(
+    type = case_when(
+      name %in% es_pairs$cre     ~ "CRE",
+      name %in% pos_neg_genes    ~ "pos_neg_gene",
+      TRUE                       ~ "gene"
+    )
+  )
+
+g <- graph_from_data_frame(edge_list, directed = TRUE, vertices = nodes)
+
+# --- 5) Define highlighted CREs from etp (enhancer_like TRUE & not >1Mb) ---
+highlight_cres <- etp %>%
+  filter(str_detect(trait, "Celiac_disease")) %>%
+  filter(
+    !ctrl_perturbation,
+    significant,
+    enhancer_like_interaction == TRUE,
+    distToTSS_bin != "> 1Mb"
+  ) %>%
+  distinct(grna_target) %>%
+  pull(grna_target)
+
+V(g)$is_hi_cre <- (V(g)$name %in% highlight_cres) & (V(g)$type == "CRE")
+
+# --- 6) Compute node sizes from out-degree under max_steps_for_size = 1 ---
+edge_list_size <- bind_rows(edges1, edges2, edges_chain_size) %>%
+  filter(from != to) %>%
+  distinct(from, to, .keep_all = TRUE)
+
+g_size <- graph_from_data_frame(
+  edge_list_size,
+  directed = TRUE,
+  vertices = tibble(name = unique(c(edge_list_size$from, edge_list_size$to)))
+)
+
+out_deg_size <- degree(g_size, mode = "out")
+V(g)$out_deg_for_size <- unname(out_deg_size[V(g)$name])
+V(g)$out_deg_for_size[is.na(V(g)$out_deg_for_size)] <- 0
+
+# --- 7) Plot (minimalist Nature vibe, original FR layout, no fading) ---
+tg <- as_tbl_graph(g) %>%
+  activate(edges) %>%
+  mutate(
+    edge_width = rescale(abs(log2fc), to = c(1, 4)),
+    edge_dir   = if_else(log2fc >= 0, "up", "down"),
+    edge_col   = if_else(edge_dir == "up", edge_col_up, edge_col_down)
+  ) %>%
+  activate(nodes) %>%
+  mutate(
+    node_size  = rescale(out_deg_for_size, to = c(5, 14)),
+    base_fill  = color_map[type],
+    node_fill  = if_else(is_hi_cre, cre_hi_fill, base_fill),
+
+    # make CREs and highlighted CREs slightly larger + use diamond (shape 23)
+    node_shape = if_else(type == "CRE", 23L, 21L),
+    node_size2 = if_else(type == "CRE", node_size * 1.25, node_size),
+
+    label_col  = if_else(name %in% highlight_genes, "#b30000", "grey65"),
+    label_face = if_else(name %in% highlight_genes, "bold", "plain"),
+
+    glow_alpha = if_else(is_hi_cre, 0.18, 0.00),
+    glow_size  = if_else(is_hi_cre, node_size2 * 2.2, node_size2)
+  )
+
+set.seed(1)
+ggraph(tg, layout = "fr") +
+  geom_edge_link(
+    aes(width = edge_width, colour = edge_col),
+    alpha = edge_alpha,          # <-- fixed alpha you control
+    lineend = "round",
+    end_cap = circle(1.6, "mm"),
+    arrow = arrow(length = unit(1.7, "mm"), type = "closed")
+  ) +
+  # Subtle glow halo (only for highlighted CREs)
+  #geom_node_point(
+ #   aes(size = glow_size, alpha = glow_alpha),
+ #   colour = cre_hi_fill,
+ #   shape = 16
+ # ) +
+  # Main nodes (no outline); CREs are shape 23 and slightly larger
+  geom_node_point(
+    aes(size = node_size2, fill = node_fill, shape = factor(node_shape)),
+    stroke = 0
+  ) +
+  # Labels: highlighted genes are bold + red
+  geom_node_text(
+    aes(label = name, colour = label_col, fontface = label_face),
+    repel = TRUE,
+    size = 9.0,
+    box.padding = unit(0.35, "lines"),
+    point.padding = unit(0.25, "lines"),
+    max.overlaps = Inf,
+    seed = 1
+  ) +
+  scale_edge_width_identity() +
+  scale_size_identity() +
+  scale_shape_manual(values = c(`21` = 21, `23` = 23)) +
+  scale_fill_identity() +
+  scale_colour_identity() +
+  scale_alpha_identity() +
+  theme_void(base_size = 11) +
+  theme(
+    plot.margin = margin(8, 8, 8, 8),
+    legend.position = "none"
+  ) +
+  coord_equal(clip = "off")
+
+
+```
+
+
+

@@ -1,0 +1,359 @@
+---
+title: "Untitled"
+format: revealjs
+editor: visual
+---
+
+## lets try a TF binding site analysis of up/down regulating enhancers
+
+repressive and activator TFs are determined using the TRRUST database (<https://www.grnpedia.org/trrust/>) v2
+
+TFBS are mined in JASPAR 2022
+
+This script works with the output of TFBS_analysis.R which is run on the cluster.
+
+(using sh submit_Rscript3.sh)
+
+```{r}
+results_df <- read_csv("/g/steinmetz/moonen/Rstudio/screen_analyses_DM/results/TFBS/results_df_TFBS_tpm2.csv")
+
+results_df <- results_df %>%
+  mutate(
+    enh_length = enh_end - enh_start,
+    repressive_tfbs_norm = repressive_tfbs_count / enh_length,
+    activator_tfbs_norm = activator_tfbs_count / enh_length
+  )
+
+```
+
+Repressive TFs
+
+```{r}
+results_df <- results_df %>% filter(interaction_type=="distal")%>%
+  group_by(grna_target) %>%
+  mutate(
+    never_significant = all(significant == FALSE)  # TRUE if all rows for this grna_target are non-significant
+  ) %>%
+  ungroup()
+
+ggplot(
+    results_df %>% 
+        filter(interaction_type=="distal", significant==TRUE,
+               !is.na(significant), !is.na(repressive_tfbs_count)),  # Include all significance and exclude NAs
+    aes(
+        # Categorize based on significance and log2 fold change, and set factor levels to order "NS" first
+        x = factor(case_when(
+            #never_significant == TRUE ~ "NS",
+            significant ==TRUE & log_2_fold_change > 0 ~ "Repressors",
+            significant ==TRUE & log_2_fold_change < 0 ~ "Enhancers"
+        ), levels = c("NS", "Repressors", "Enhancers")),
+        y = repressive_tfbs_norm,
+        fill = factor(case_when(
+            #never_significant == TRUE ~ "NS",
+            significant ==TRUE & log_2_fold_change > 0 ~ "Repressors",
+            significant ==TRUE & log_2_fold_change < 0 ~ "Enhancers"
+        ), levels = c("NS", "Repressors", "Enhancers"))
+    )
+) +
+    geom_violin(trim = FALSE, alpha = 0.6) +  # Adjusted transparency for better layering
+    geom_boxplot(width = 0.1, outlier.shape = NA, alpha = 0.8, fill = "white") +  # Semi-transparent boxplots
+    stat_summary(
+        fun.data = "mean_sdl",
+        geom = "crossbar",
+        width = 0.2,
+        color = "black",
+        fun.args = list(mult = 1)
+    ) +
+    scale_fill_manual(
+        values = c(
+           # "NS" = "grey70",
+            "Repressors" = "steelblue",
+            "Enhancers" = "salmon"
+        )
+    ) +
+    labs(
+        title = "Repressive TFBS Counts ",
+        x = "Category",
+        y = "Number of Repressive TFBS",
+        fill = "Category"
+    ) +
+   # coord_cartesian(ylim = c(0, 500)) +  # Limit y-axis to remove/display only up to 2000
+    theme_minimal() +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+        axis.title = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10)
+    )
+```
+
+Activating TFs
+
+```{r}
+
+ggplot(
+    results_df %>% 
+        filter(interaction_type=="distal", significant==TRUE,
+               !is.na(significant), !is.na(activator_tfbs_count)),   # Include all significance and exclude NAs
+    aes(
+        # Categorize based on significance and log2 fold change, and set factor levels to order "NS" first
+        x = factor(case_when(
+            #never_significant == TRUE ~ "NS",
+            significant ==TRUE & log_2_fold_change > 0 ~ "Repressors",
+            significant ==TRUE & log_2_fold_change < 0 ~ "Enhancers"
+        ), levels = c("NS", "Repressors", "Enhancers")),
+        y = activator_tfbs_norm,
+        fill = factor(case_when(
+            #never_significant == TRUE ~ "NS",
+            significant ==TRUE & log_2_fold_change > 0 ~ "Repressors",
+            significant ==TRUE & log_2_fold_change < 0 ~ "Enhancers"
+        ), levels = c("NS", "Repressors", "Enhancers"))
+    )
+) +
+    geom_violin(trim = FALSE, alpha = 0.6) +  # Adjusted transparency for better layering
+    geom_boxplot(width = 0.1, outlier.shape = NA, alpha = 0.8, fill = "white") +  # Semi-transparent boxplots
+    stat_summary(
+        fun.data = "mean_sdl",
+        geom = "crossbar",
+        width = 0.2,
+        color = "black",
+        fun.args = list(mult = 1)
+    ) +
+    scale_fill_manual(
+        values = c(
+            "NS" = "grey70",
+            "Repressors" = "steelblue",
+            "Enhancers" = "salmon"
+        )
+    ) +
+    labs(
+        title = "Activating TFBS Counts ",
+        x = "Category",
+        y = "Number of Activating TFBS",
+        fill = "Category"
+    ) +
+   # coord_cartesian(ylim = c(0, 1000)) +  # Limit y-axis to remove/display only up to 2000
+    theme_minimal() +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+        axis.title = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10)
+    )
+```
+
+ratio of repressive vs activating TFBS
+
+```{r}
+ggplot(
+    results_df %>% 
+        filter(interaction_type=="distal", significant==TRUE,
+               !is.na(significant), !is.na(activator_tfbs_count)),   # Include all significance and exclude NAs
+    aes(
+        # Categorize based on significance and log2 fold change, and set factor levels to order "NS" first
+        x = factor(case_when(
+            #never_significant == TRUE ~ "NS",
+            significant ==TRUE & log_2_fold_change > 0 ~ "Repressors",
+            significant ==TRUE & log_2_fold_change < 0 ~ "Enhancers"
+        ), levels = c("NS", "Repressors", "Enhancers")),
+        y = (repressive_tfbs_count/activator_tfbs_count),
+        fill = factor(case_when(
+            #never_significant == TRUE ~ "NS",
+            significant ==TRUE & log_2_fold_change > 0 ~ "Repressors",
+            significant ==TRUE & log_2_fold_change < 0 ~ "Enhancers"
+        ), levels = c("NS", "Repressors", "Enhancers"))
+    )
+) +
+    geom_violin(trim = FALSE, alpha = 0.6) +  # Adjusted transparency for better layering
+    geom_boxplot(width = 0.1, outlier.shape = NA, alpha = 0.8, fill = "white") +  # Semi-transparent boxplots
+    stat_summary(
+        fun.data = "mean_sdl",
+        geom = "crossbar",
+        width = 0.2,
+        color = "black",
+        fun.args = list(mult = 1)
+    ) +
+    scale_fill_manual(
+        values = c(
+            "NS" = "grey70",
+            "Repressors" = "steelblue",
+            "Enhancers" = "salmon"
+        )
+    ) +
+    labs(
+        title = "Ratio repressive vs activating TFBS Counts ",
+        x = "Category",
+        y = "Repressive/Activating TFBS Counts",
+        fill = "Category"
+    ) +
+   # coord_cartesian(ylim = c(0, 1000)) +  # Limit y-axis to remove/display only up to 2000
+    theme_minimal() +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+        axis.title = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10)
+    )
+```
+
+Summary stats
+
+```{r}
+# Summarize counts and calculate mean & median for specified columns
+category_summary <- results_df %>%
+  filter(
+    interaction_type == "distal", significant==TRUE,
+    !is.na(significant),
+    !is.na(repressive_tfbs_count)
+  ) %>%
+  mutate(
+    Category = case_when(
+      #never_significant == TRUE ~ "NS",
+      significant ==TRUE & log_2_fold_change > 0 ~ "Repressors",
+      significant ==TRUE & log_2_fold_change < 0 ~ "Enhancers"
+    )
+ ) %>%
+  group_by(Category) %>%
+  summarise(
+    Count = n(),
+    Average_enh_length = mean(enh_length, na.rm = TRUE),
+    Median_enh_length = median(enh_length, na.rm = TRUE),
+    Mean_repressive_tfbs_count = mean(repressive_tfbs_count, na.rm = TRUE),
+    Mean_repressive_tfbs_norm = mean(repressive_tfbs_norm, na.rm = TRUE),
+    Median_repressive_tfbs_count = median(repressive_tfbs_count, na.rm = TRUE),
+    Median_repressive_tfbs_norm = median(repressive_tfbs_norm, na.rm = TRUE),
+    Mean_activator_tfbs_count = mean(activator_tfbs_count, na.rm = TRUE),
+    Mean_activator_tfbs_norm = mean(activator_tfbs_norm, na.rm = TRUE),
+    Median_activator_tfbs_count = median(activator_tfbs_count, na.rm = TRUE),
+    Median_activator_tfbs_norm = median(activator_tfbs_norm, na.rm = TRUE), 
+    Ratio_repressive_activator = mean((repressive_tfbs_count/activator_tfbs_count), na.rm=TRUE)
+  ) %>%
+  ungroup()
+
+# Print the summarized table
+print(category_summary)
+
+```
+
+```{r}
+# Identify whether each grna_target consistently has positive or negative log2_fold_change
+grna_classification <- results_df %>%
+  group_by(grna_target) %>% filter(significant==TRUE, interaction_type == "distal") %>%
+  summarise(
+    all_positive = all(log_2_fold_change > 0, na.rm = TRUE),  # TRUE if all values are > 0
+    all_negative = all(log_2_fold_change < 0, na.rm = TRUE)   # TRUE if all values are < 0
+  ) %>%
+  mutate(
+    grna_type = case_when(
+      all_positive ~ "Repressors",   # All log2 fold changes are > 0
+      all_negative ~ "Enhancers",   # All log2 fold changes are < 0
+      TRUE ~ "Mixed"               # Mixed cases (optional, can exclude)
+    )
+  ) %>%
+  select(grna_target, grna_type)
+
+# Join the classification back to the original data
+results_df <- results_df %>% 
+  left_join(grna_classification, by = "grna_target")
+
+
+
+# Create the violin plot with new categories (grna_type)
+ggplot(
+    results_df %>% 
+        filter(
+            interaction_type == "distal", 
+            !is.na(grna_type),  # Ensure grna_type is not NA
+            !is.na(repressive_tfbs_norm)  # Exclude rows with NA in repressive_tfbs_count
+        ),
+    aes(
+        x = grna_type,  # Use grna_type as the x-axis categories
+        y = repressive_tfbs_norm,
+        fill = grna_type  # Fill based on grna_type for coloring
+    )
+) +
+    geom_violin(trim = FALSE, alpha = 0.6) +
+    geom_boxplot(width = 0.1, outlier.shape = NA, alpha = 0.8, fill = "white") +
+    stat_summary(
+        fun.data = "mean_sdl",
+        geom = "crossbar",
+        width = 0.2,
+        color = "black",
+        fun.args = list(mult = 1)
+    ) +
+    scale_fill_manual(
+        values = c(
+            "Repressors" = "steelblue",
+            "Enhancers" = "salmon",
+            "Mixed" = "grey70"
+        )
+    ) +
+    labs(
+        title = "Repressive TFBS Counts ",
+        x = "grna_target Type",
+        y = "Number of Repressive TFBS",
+        fill = "grna_target Type"
+    ) +
+ #   coord_cartesian(ylim = c(0, 500)) +
+    theme_minimal() +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+        axis.title = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10)
+    )
+
+```
+
+```{r}
+# Create the violin plot with new categories (grna_type)
+ggplot(
+    results_df %>% 
+        filter(
+            interaction_type == "distal", 
+            !is.na(grna_type),  # Ensure grna_type is not NA
+            !is.na(activator_tfbs_norm)  # Exclude rows with NA in repressive_tfbs_count
+        ),
+    aes(
+        x = grna_type,  # Use grna_type as the x-axis categories
+        y = activator_tfbs_norm,
+        fill = grna_type  # Fill based on grna_type for coloring
+    )
+) +
+    geom_violin(trim = FALSE, alpha = 0.6) +
+    geom_boxplot(width = 0.1, outlier.shape = NA, alpha = 0.8, fill = "white") +
+    stat_summary(
+        fun.data = "mean_sdl",
+        geom = "crossbar",
+        width = 0.2,
+        color = "black",
+        fun.args = list(mult = 1)
+    ) +
+    scale_fill_manual(
+        values = c(
+            "Repressors" = "steelblue",
+            "Enhancers" = "salmon",
+            "Mixed" = "grey70"
+        )
+    ) +
+    labs(
+        title = "Activator TFBS Counts ",
+        x = "grna_target Type",
+        y = "Number of Activator TFBS",
+        fill = "grna_target Type"
+    ) +
+    #coord_cartesian(ylim = c(0, 500)) +
+    theme_minimal() +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+        axis.title = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10)
+    )
+
+```

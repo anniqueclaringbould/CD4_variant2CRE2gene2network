@@ -1,0 +1,245 @@
+sample_groups:
+  Panel1:
+    samples: [A1, B1, C1]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_1_2023-12-22.csv"
+  Panel2:
+    samples: [A2, B2, C2]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_2_2023-12-22.csv"
+  Panel3:
+    samples: [A3, B3, C3]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_3_2023-12-22.csv"
+  Panel4:
+    samples: [A4, B4, C4]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_4_2023-12-22.csv"
+  Panel5:
+    samples: [A5, B5, C5]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_5_2023-12-22.csv"
+  Panel6:
+    samples: [A6, B6, C6]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_6_2023-12-22.csv"
+  Panel7:
+    samples: [A7, B7, C7]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_7_2023-12-22.csv"
+  Panel8:
+    samples: [A8_N, B8_N, C8_N]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_8_2023-12-22.csv"
+  Panel9:
+    samples: [A9_N, B9_N, C9_N]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_9_2023-12-22.csv"
+  Panel10:
+    samples: [A10_N, B10_N, C10_N]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_10_2023-12-22.csv"
+  Panel11:
+    samples: [A11_N, B11_N, C11_N]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_11_2023-12-22.csv"
+  Panel12:
+    samples: [A12, B12, C12]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_12_2023-12-22.csv"
+  Panel13:
+    samples: [A13, B13, C13]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_13_2023-12-22.csv"
+  Panel14:
+    samples: [A14, B14, C14]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_14_2023-12-22.csv"
+  Panel15:
+    samples: [A15, B15, C15]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_15_2023-12-22.csv"
+  Panel16:
+    samples: [A16, B16, C16]
+    guides: "/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_16_2023-12-22.csv"
+
+samples:
+  A1:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A1/Enhancerscreen-2-2-A1_Seurat.rds"
+  B1:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B1/Enhancerscreen-2-2-B1_Seurat.rds"
+  C1:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C1/Enhancerscreen-2-2-C1_Seurat.rds"
+  A2:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A2/Enhancerscreen-2-2-A2_Seurat.rds"
+  B2:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B2/Enhancerscreen-2-2-B2_Seurat.rds"
+  C2:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C2/Enhancerscreen-2-2-C2_Seurat.rds"
+  A3:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A3/Enhancerscreen-2-2-A3_Seurat.rds"
+  B3:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B3/Enhancerscreen-2-2-B3_Seurat.rds"
+  C3:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C3/Enhancerscreen-2-2-C3_Seurat.rds"
+  A4:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A4/Enhancerscreen-2-2-A4_Seurat.rds"
+  B4:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B4/Enhancerscreen-2-2-B4_Seurat.rds"
+  C4:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C4/Enhancerscreen-2-2-C4_Seurat.rds"
+  A5:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A5/Enhancerscreen-2-2-A5_Seurat.rds"
+  B5:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B5/Enhancerscreen-2-2-B5_Seurat.rds"
+  C5:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C5/Enhancerscreen-2-2-C5_Seurat.rds"
+  A6:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A6/Enhancerscreen-2-2-A6_Seurat.rds"
+  B6:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B6/Enhancerscreen-2-2-B6_Seurat.rds"
+  C6:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C6/Enhancerscreen-2-2-C6_Seurat.rds"
+  A7:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A7/Enhancerscreen-2-2-A7_Seurat.rds"
+  B7:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B7/Enhancerscreen-2-2-B7_Seurat.rds"
+  C7:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C7/Enhancerscreen-2-2-C7_Seurat.rds"
+  A8_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A8_N/Enhancerscreen-2-2-A8-N_Seurat.rds"
+  B8_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B8_N/Enhancerscreen-2-2-B8-N_Seurat.rds"
+  C8_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C8_N/Enhancerscreen-2-2-C8-N_Seurat.rds"
+  A9_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A9_N/Enhancerscreen-2-2-A9-N_Seurat.rds"
+  B9_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B9_N/Enhancerscreen-2-2-B9-N_Seurat.rds"
+  C9_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C9_N/Enhancerscreen-2-2-C9-N_Seurat.rds"
+  A10_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A10_N/Enhancerscreen-2-2-A10-N_Seurat.rds"
+  B10_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B10_N/Enhancerscreen-2-2-B10-N_Seurat.rds"
+  C10_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C10_N/Enhancerscreen-2-2-C10-N_Seurat.rds"
+  A11_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A11_N/Enhancerscreen-2-2-A11-N_Seurat.rds"
+  B11_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B11_N/Enhancerscreen-2-2-B11-N_Seurat.rds"
+  C11_N:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C11_N/Enhancerscreen-2-2-C11-N_Seurat.rds"
+  A12:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A12/Enhancerscreen-2-2-A12_Seurat.rds"
+  B12:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B12/Enhancerscreen-2-2-B12_Seurat.rds"
+  C12:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C12/Enhancerscreen-2-2-C12_Seurat.rds"
+  A13:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A13/Enhancerscreen-2-2-A13_Seurat.rds"
+  B13:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B13/Enhancerscreen-2-2-B13_Seurat.rds"
+  C13:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C13/Enhancerscreen-2-2-C13_Seurat.rds"
+  A14:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A14/Enhancerscreen-2-2-A14_Seurat.rds"
+  B14:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B14/Enhancerscreen-2-2-B14_Seurat.rds"
+  C14:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C14/Enhancerscreen-2-2-C14_Seurat.rds"
+  A15:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A15/Enhancerscreen-2-2-A15_Seurat.rds"
+  B15:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B15/Enhancerscreen-2-2-B15_Seurat.rds"
+  C15:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C15/Enhancerscreen-2-2-C15_Seurat.rds"
+  A16:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/A16/Enhancerscreen-2-2-A16_Seurat.rds"
+  B16:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/B16/Enhancerscreen-2-2-B16_Seurat.rds"
+  C16:
+    seurat: "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/output/C16/Enhancerscreen-2-2-C16_Seurat.rds"
+
+doublet_rate:
+  A1:
+    multiplet_rate: 18.0
+  A2: 
+    multiplet_rate: 8.8
+  A3:
+    multiplet_rate: 11.9
+  A4: 
+    multiplet_rate: 11.8
+  A5:
+    multiplet_rate: 8.8
+  A6:
+    multiplet_rate: 11.5
+  A7:
+    multiplet_rate: 12.2
+  A8_N:
+    multiplet_rate: 9.6
+  A9_N:
+    multiplet_rate: 12.7
+  A10_N:
+    multiplet_rate: 12.6
+  A11_N:
+    multiplet_rate: 8.1
+  A12:
+    multiplet_rate: 10.6
+  A13:
+    multiplet_rate: 12.9
+  A14:
+    multiplet_rate: 12.3
+  A15:
+    multiplet_rate: 10
+  A16:
+    multiplet_rate: 11.5
+  B1:
+    multiplet_rate: 11.6
+  B2:
+    multiplet_rate: 10.8
+  B3:
+    multiplet_rate: 10.5
+  B4:
+    multiplet_rate: 10.1
+  B5:
+    multiplet_rate: 11.7
+  B6:
+    multiplet_rate: 11.6
+  B7:
+    multiplet_rate: 11.3
+  B8_N:
+    multiplet_rate: 9.6
+  B9_N:
+    multiplet_rate: 30.8
+  B10_N:
+    multiplet_rate: 9.1
+  B11_N:
+    multiplet_rate: 10.9
+  B12:
+    multiplet_rate: 10.7
+  B13:
+    multiplet_rate: 11.7
+  B14:
+    multiplet_rate: 11.5
+  B15:
+    multiplet_rate: 11.3
+  B16:
+    multiplet_rate: 11.9
+  C1:
+    multiplet_rate: 11.6
+  C2:
+    multiplet_rate: 10
+  C3:
+    multiplet_rate: 10
+  C4:
+    multiplet_rate: 11.2
+  C5:
+    multiplet_rate: 13.1
+  C6:
+    multiplet_rate: 11.6
+  C7:
+    multiplet_rate: 10.7
+  C8_N:
+    multiplet_rate: 12.1
+  C9_N:
+    multiplet_rate: 12.4
+  C10_N:
+    multiplet_rate: 12.3
+  C11_N:
+    multiplet_rate: 11.5
+  C12:
+    multiplet_rate: 11.2
+  C13:
+    multiplet_rate: 12.3
+  C14:
+    multiplet_rate: 11.4
+  C15:
+    multiplet_rate: 11.7
+  C16:
+    multiplet_rate: 12

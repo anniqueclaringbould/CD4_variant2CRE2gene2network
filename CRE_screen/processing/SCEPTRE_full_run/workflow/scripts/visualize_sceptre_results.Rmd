@@ -1,0 +1,98 @@
+---
+title: "Visualize sceptre results"
+author: "Andreas Gschwind"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Goal
+Visualize sceptre results for `r snakemake@wildcards$group`.
+```{r attachPackages, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(cowplot)
+```
+
+## Load data
+```{r}
+# load sceptre main output file
+results <- read_tsv(snakemake@input$results, show_col_types = FALSE)
+
+# load gene list containing TSS coordinates
+genes <- read_tsv(snakemake@input$genes, show_col_types = FALSE)
+```
+
+```{r}
+# add gene TSS coordinates to results and derive enhancer coordinates from id
+results <- results %>% 
+  left_join(genes, by = "response_id") %>% 
+  rename(gene_chr = chr, gene_tss = position) %>% 
+  separate(grna_target, into = c("pert_chr", "pert_start", "pert_end"), sep = ":|-",
+           remove = FALSE, fill = "right", convert = TRUE) %>% 
+  mutate(pert_chr = if_else(is.na(pert_start), true = NA_character_, false = pert_chr))
+
+# compute distance to TSS for distal cis pairs
+results <- results %>% 
+  mutate(distance = if_else(
+    pert_chr == gene_chr,
+    true = abs((pert_start + pert_end) / 2 - gene_tss),
+    false = NA_integer_))
+```
+
+***
+
+## Plot p-value vs. distance to TSS for cis enhancer perturbations
+```{r, fig.height=4, fig.width=10}
+# get results for all cis-pairs, or cis-pairs within 2Mb from TSS
+cis_results <- filter(results, pert_chr == gene_chr)
+cis_results_2mb <- filter(cis_results, distance <= 2e6)
+
+# plot all cis-pairs regardless of distance
+p1 <- ggplot(cis_results, aes(x = distance / 1000, y = -log10(p_value), color = significant)) +
+  geom_point(data = filter(cis_results, significant == FALSE)) +
+  geom_point(data = filter(cis_results, significant == TRUE)) +
+  labs(title = paste0("All cis-pairs (", sum(cis_results$significant, na.rm = TRUE), " positives)"),
+       x = "Distance to TSS (kb)", color = "Significant") +
+  scale_color_manual(values = c("TRUE" = "firebrick3", "FALSE" = "darkgray")) +
+  theme_bw() 
+
+# plot all cis-pairs within 2 Mb
+p2 <- ggplot(cis_results_2mb, aes(x = distance / 1000, y = -log10(p_value), color = significant)) +
+  geom_point(data = filter(cis_results_2mb, significant == FALSE)) +
+  geom_point(data = filter(cis_results_2mb, significant == TRUE)) +
+  labs(title = paste0("Cis-pairs <= 2Mb from TSS (", sum(cis_results_2mb$significant, na.rm = TRUE),
+                      " positives)"), x = "Distance to TSS (kb)", color = "Significant") +
+  scale_color_manual(values = c("TRUE" = "firebrick3", "FALSE" = "darkgray")) +
+  theme_bw()
+
+# arrange plots into one figure
+plot_grid(p1 + theme(legend.position = "none"), p2, rel_widths = c(0.8, 1), nrow = 1)
+```
+
+***
+
+## Plot effect size as function of distance
+```{r, fig.height=4, fig.width=6, warning=FALSE}
+# label down- and up-regulated cis-pairs
+cis_results <- cis_results %>% 
+  mutate(direction = case_when(
+    significant == TRUE & log_2_fold_change <= 0 ~ "down-regulated",
+    significant == TRUE & log_2_fold_change > 0 ~ "up-regulated",
+    TRUE ~ "non-significant"
+  ))
+
+# plot effect size as a function of distance
+ggplot(cis_results, aes(x = distance / 1000, y = log_2_fold_change, color = direction)) +
+  geom_point(data = filter(cis_results, direction == "non-significant")) +
+  geom_point(data = filter(cis_results, direction != "non-significant")) +
+  geom_hline(yintercept = 0) +
+  labs(title = "Effect size vs. distance to TSS (all distal cis-pairs)", x = "Distance to TSS (kb)",
+       y = "log2 FC", color = "Direction") +
+  scale_color_manual(values = c("down-regulated" = "firebrick3", "up-regulated" = "steelblue",
+                                "non-significant" = "darkgray")) +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme_bw()
+```

@@ -1,0 +1,687 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+
+library(biomaRt)
+library(ComplexHeatmap)
+library(circlize)
+library(tidyverse)
+library(data.table)
+library(Seurat)
+library(optparse)
+library(ggplot2)
+library(ggrepel)
+library(viridis)
+#library(qs)
+library(gridExtra)
+library(Rcpp)
+library(scDblFinder)
+library(ggrastr)
+library(Matrix)
+library(tibble)
+library(dplyr)
+library(RColorBrewer)
+library(ggpubr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(rtracklayer)
+```
+
+```{r}
+select <- dplyr::select
+rename <- dplyr::rename
+slice <- dplyr::slice
+map <- purrr::map
+mutate <- dplyr::mutate
+filter<-dplyr::filter
+
+#dir <- "/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/"
+#indir <- paste0(dir, "output")
+outdir <- paste0("/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results")
+
+## load result files
+results_path <- "/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results"
+
+# Get the list of all folders named Panel1 to Panel16
+panel_folders <- list.files(results_path, pattern = "Panel[1-9]|Panel1[0-6]", full.names = TRUE, include.dirs = TRUE)
+
+# Function to read a discovery_results.tsv file from a given folder
+read_discovery_results <- function(folder) {
+  file_path <- file.path(folder, "discovery_results.tsv")
+  if (file.exists(file_path)) {
+    return(read.delim(file_path, header = TRUE, sep = "\t"))
+  } else {
+    return(NULL)
+  }
+}
+
+# Read all discovery_results.tsv files into a list
+discovery_results_list <- lapply(panel_folders, read_discovery_results)
+
+# Optionally, you can remove NULL entries if any folder does not contain the file
+discovery_results_list <- Filter(Negate(is.null), discovery_results_list)
+
+results_df <- bind_rows(discovery_results_list, .id = "panel")
+
+
+#load gene data
+genes <- read_tsv("/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/resources/gene_tss.tsv", show_col_types = FALSE)
+# add gene TSS coordinates to results and derive enhancer coordinates from id
+results_df <- results_df %>% 
+  left_join(genes, by = "response_id") %>% 
+  rename(gene_chr = chr, gene_tss = position) %>% 
+  separate(grna_target, into = c("pert_chr", "pert_start", "pert_end"), sep = ":|-",
+           remove = FALSE, fill = "right", convert = TRUE) %>% 
+  mutate(pert_chr = if_else(is.na(pert_start), true = NA_character_, false = pert_chr))
+
+
+## load gRNA library details
+# Define the path to the folder containing the CSV files
+grna_lib_list <- list()
+grna_lib_list[[1]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_1_2023-12-22.csv')
+grna_lib_list[[2]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_2_2023-12-22.csv')
+grna_lib_list[[3]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_3_2023-12-22.csv')
+grna_lib_list[[4]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_4_2023-12-22.csv')
+grna_lib_list[[5]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_5_2023-12-22.csv')
+grna_lib_list[[6]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_6_2023-12-22.csv')
+grna_lib_list[[7]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_7_2023-12-22.csv')
+grna_lib_list[[8]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_8_2023-12-22.csv')
+grna_lib_list[[9]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_9_2023-12-22.csv')
+grna_lib_list[[10]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_10_2023-12-22.csv')
+grna_lib_list[[11]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_11_2023-12-22.csv')
+grna_lib_list[[12]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_12_2023-12-22.csv')
+grna_lib_list[[13]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_13_2023-12-22.csv')
+grna_lib_list[[14]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_14_2023-12-22.csv')
+grna_lib_list[[15]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_15_2023-12-22.csv')
+grna_lib_list[[16]] <- read_csv('/g/steinmetz/project/otar/select_enhancer_peaks/guide_design/output/gRNA_info_vivlion_panel_16_2023-12-22.csv')
+
+grna_lib <- bind_rows(grna_lib_list)
+
+
+#load benedikt's GTF
+gtf <- readGFF("/g/steinmetz/brausche/genomes/alias/hg38/gencode_gtf/default/hg38.gtf")
+
+#keep gene name to ENSG conversion and gene location
+gtf <- gtf %>%
+  filter(type == "gene") %>%
+  select(gene_id, gene_name, seqid, start, end, strand) %>%
+  mutate(gene_id = sub("\\..*$", "", gene_id)) %>%
+  distinct() 
+
+
+targets <- grna_lib %>% 
+  select(peak = peak, target_gene = target_gene) %>%
+  unique()
+
+#Separate the target_gene column into individual rows
+targets <- targets %>%
+  separate_rows(target_gene, sep = ";")
+
+#Join with the gtf dataframe to map ENSG IDs to gene_name
+# Assuming gtf has been loaded with only the relevant columns (gene_id and gene_name)
+targets <- targets%>%
+  left_join(gtf[, c("gene_id", "gene_name")], by = c("target_gene" = "gene_id"))
+
+targets <- targets %>%
+  group_by(peak) %>%
+  summarise(target_genes = paste(unique(gene_name), collapse = ";"), .groups = "drop")
+
+#combine all results into one data frame
+#results_df <- do.call(rbind, discovery_results_list)
+
+# Add ENSG IDs and gene locations to the results_df
+results_df <- results_df %>%
+  left_join(gtf, by = c("response_id" = "gene_name"))
+
+results_df <- results_df %>%
+  left_join(targets, by = c("grna_target" = "peak")) %>%
+  mutate(target_genes = ifelse(is.na(target_genes), grna_target, target_genes))
+
+results_df <- results_df %>%
+  mutate(is_target = sapply(1:n(), function(i) {
+    target_list <- unlist(strsplit(target_genes[i], ";"))
+    response_id[i] %in% target_list
+  }))
+
+results_df <- results_df %>%
+  rename(gene_start = start, gene_end = end)
+
+
+# Extract enhancer chromosome, start, and end positions from grna_target
+results_df <- results_df %>%
+  mutate(enh_chr = ifelse(grepl("chr", grna_target), sub(":.*", "", grna_target), NA),
+         enh_start = ifelse(grepl("chr", grna_target), as.numeric(sub(".*:(\\d+)-.*", "\\1", grna_target)), NA),
+         enh_end = ifelse(grepl("chr", grna_target), as.numeric(sub(".*-(\\d+)", "\\1", grna_target)), NA))
+
+# Add shortest distance between enhancer and gene, when any overlap -> 0. Independent of strand.
+results_df <- results_df %>%
+  mutate(distance = case_when(
+    !is.na(enh_end) & enh_end < gene_start & enh_chr == gene_chr ~ enh_end - gene_start,   # Enhancer is before gene
+    !is.na(enh_start) & enh_start > gene_end & enh_chr == gene_chr ~ enh_start - gene_end, # Enhancer is after gene
+    !is.na(enh_start) & !is.na(enh_end) & enh_start <= gene_end & enh_end >= gene_start & enh_chr == gene_chr ~ 0, # Overlap
+    TRUE ~ NA_real_  # If enh_chr is NA or other cases
+  ))
+    
+  
+
+results_df <- results_df %>%
+  # Add TSS_position based on the strand: gene_start for positive strand, gene_end for negative strand
+  mutate(TSS_position = ifelse(strand == "+", gene_start, gene_end)) %>%
+ # Calculate TSS distance (midpoint of enhancer to TSS) based on the strand
+  mutate(TSS_dist = if_else(
+    enh_chr == gene_chr,
+    true = (enh_start + enh_end) / 2 - TSS_position,  # Calculate distance from TSS
+    false = NA_real_  # In case chromosomes don't match
+  ))
+
+# Drop the intermediate enh_center column (if not needed)
+#results_df <- results_df %>%
+#  select(-enh_center)
+
+results_df<-results_df%>% 
+  mutate(pval_scaled = -log10(p_value + 1e-15))
+
+write.csv(results_df, paste0(outdir, "/results_df.csv"), row.names = FALSE)
+
+```
+
+```{r}
+
+##plot distance against effect size
+
+
+symlog_trans <- function() {
+   trans <- function(x) sign(x) * log1p(abs(x))
+   inv <- function(x) sign(x) * (exp(abs(x)) - 1)
+   scales::trans_new(name = 'symlog', transform = trans, inverse = inv)
+ }
+ 
+ symlog_breaks <- function(limits) {
+   breaks <- unique(c(-rev(10^seq(0, log10(abs(limits[1])), length.out = 5)),
+                      0,
+                      10^seq(0, log10(abs(limits[2])), length.out = 5)))
+   breaks
+ }
+ custom_breaks <- c(-500000, -100000, -50000, -10000, -5000, -1000, -500, -100, -50, -10, 0, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000)
+ 
+expr_change_dist <- ggplot(results_df %>% filter(significant==TRUE) %>% filter(enh_chr == gene_chr), aes(x = (distance / 1000), y = log_2_fold_change, color = as.factor(gene_chr), shape = is_target)) +
+   geom_point(alpha = 0.5, fill = NA, stroke = 1) +
+   scale_color_discrete(name = "Chromosome") +  # Automatically generate colors for chromosomes
+   scale_size_continuous(range = c(0.075, 3), guide = guide_legend(title = "1/(p-value)")) +
+   scale_shape_manual(name = "Expected target", values = c("TRUE" = 16, "FALSE" = 21), labels = c("Yes" = "TRUE", "No" = "FALSE")) +
+  scale_x_continuous(trans = symlog_trans(), breaks = custom_breaks, name = "Logarithmic Distance to TSS or gene end (kb, symlog scale)") +
+   labs(
+     title = "Distance to TSS or gene end vs. Expression Change",
+     y = "Expression change (log2FC)",
+     x = "Distance to TSS (kb)" ) +
+   #xlim(-1000, 1000)+
+   theme_minimal() +
+   theme(
+     legend.position = "right",
+     legend.title.align = 0.5,
+     plot.title = element_text(hjust = 0.5),
+     plot.subtitle = element_text(hjust = 0.5),
+     axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+   ) +
+ geom_vline(xintercept = c(-1.5, 1.5), linetype = "dotted", color = "red", size = 1) +
+ geom_vline(xintercept = c(-10, 10), linetype = "dotted", color = "grey", size = 1)
+
+
+ pdf(paste0(outdir, "/distance_gene_expr_change_all_panels.pdf"), height = 6, width = 12)
+ expr_change_dist
+ dev.off()
+ 
+ 
+ expr_change_dist_TSS <- ggplot(results_df %>% filter(significant==TRUE) %>% filter(enh_chr == gene_chr), aes(x = (TSS_dist / 1000), y = log_2_fold_change, color = as.factor(gene_chr), shape = is_target)) +
+   geom_point(alpha = 0.5, fill = NA, stroke = 1) +
+   scale_color_discrete(name = "Chromosome") +  # Automatically generate colors for chromosomes
+   scale_size_continuous(range = c(0.075, 3), guide = guide_legend(title = "1/(p-value)")) +
+   scale_shape_manual(name = "Expected target", values = c("TRUE" = 16, "FALSE" = 21), labels = c("Yes" = "TRUE", "No" = "FALSE")) +
+  scale_x_continuous(trans = symlog_trans(), breaks = custom_breaks, name = "Logarithmic Distance to TSS (kb, symlog scale)") +
+   labs(
+     title = "Distance to TSS vs. Expression Change",
+     y = "Expression change (log2FC)",
+     x = "Distance to TSS (kb)" ) +
+   #xlim(-1000, 1000)+
+   theme_minimal() +
+   theme(
+     legend.position = "right",
+     legend.title.align = 0.5,
+     plot.title = element_text(hjust = 0.5),
+     plot.subtitle = element_text(hjust = 0.5),
+     axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+   ) +
+ geom_vline(xintercept = c(-1.5, 1.5), linetype = "dotted", color = "red", size = 1) +
+ geom_vline(xintercept = c(-10, 10), linetype = "dotted", color = "grey", size = 1)
+
+
+ pdf(paste0(outdir, "/TSS_distance_gene_expr_change_all_panels.pdf"), height = 6, width = 12)
+ expr_change_dist_TSS
+ dev.off()
+
+```
+
+same plots but coloured by p-value
+
+```{r}
+expr_change_dist_p <- ggplot(results_df %>% filter(significant == TRUE) %>% filter(enh_chr == gene_chr), 
+                           aes(x = (distance / 1000), y = log_2_fold_change, color = pval_scaled, shape = is_target)) +
+  geom_point(alpha = 0.5, fill = NA, stroke = 1) +
+  scale_color_gradient(name = "-log10(p-value + 1e-15)", low = "blue", high = "red") +  # Gradient from low to high p-value
+  scale_shape_manual(name = "Expected target", values = c("TRUE" = 16, "FALSE" = 21), labels = c("Yes" = "TRUE", "No" = "FALSE")) +
+  scale_x_continuous(trans = symlog_trans(), breaks = custom_breaks, name = "Logarithmic Distance to TSS or gene end (kb, symlog scale)") +
+  labs(
+    title = "Distance to TSS or gene end vs. Expression Change",
+    y = "Expression change (log2FC)",
+    x = "Distance to TSS (kb)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title.align = 0.5,
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+  ) +
+  geom_vline(xintercept = c(-1.5, 1.5), linetype = "dotted", color = "red", size = 1) +
+  geom_vline(xintercept = c(-10, 10), linetype = "dotted", color = "grey", size = 1)
+
+pdf(paste0(outdir, "/distance_gene_expr_change_all_panels_pvalue.pdf"), height = 6, width = 12)
+expr_change_dist_p
+dev.off()
+
+
+## with TSS distance
+
+expr_change_dist_TSS_p <- ggplot(results_df %>% filter(significant == TRUE) %>% filter(enh_chr == gene_chr), 
+                               aes(x = (TSS_dist / 1000), y = log_2_fold_change, color = pval_scaled, shape = is_target)) +
+  geom_point(alpha = 0.5, fill = NA, stroke = 1) +
+  scale_color_gradient(name = "-log10(p-value + 1e-15)", low = "blue", high = "red") +  # Gradient for p-value coloring
+  scale_shape_manual(name = "Expected target", values = c("TRUE" = 16, "FALSE" = 21), labels = c("Yes" = "TRUE", "No" = "FALSE")) +
+  scale_x_continuous(trans = symlog_trans(), breaks = custom_breaks, name = "Logarithmic Distance to TSS (kb, symlog scale)") +
+  labs(
+    title = "Distance to TSS vs. Expression Change",
+    y = "Expression change (log2FC)",
+    x = "Distance to TSS (kb)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title.align = 0.5,
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels to 45 degrees
+  ) +
+  geom_vline(xintercept = c(-1.5, 1.5), linetype = "dotted", color = "red", size = 1) +
+  geom_vline(xintercept = c(-10, 10), linetype = "dotted", color = "grey", size = 1)
+
+pdf(paste0(outdir, "/TSS_distance_gene_expr_change_all_panels_pvalue.pdf"), height = 6, width = 12)
+expr_change_dist_TSS_p
+dev.off()
+```
+
+
+```{r}
+## Vulcanoplot
+
+####vulcano plot
+
+results_df<-results_df%>% 
+  mutate(pval_scaled = -log10(p_value + 1e-15))
+ 
+# Generate the volcano plot
+vulcano <- ggplot(results_df %>% filter(enh_chr == gene_chr), aes(x = log_2_fold_change, y = pval_scaled)) +
+  geom_point(aes(
+    fill = significant, 
+    color = ifelse(is_target, "TRUE", "FALSE")
+  ), shape = 21, size = 2.5, stroke = 0.5) +
+  scale_fill_manual(
+    values = c('FALSE' = '#dddddd', 'TRUE' = '#4285f4'), 
+    name = "Significant"
+  ) +
+  scale_color_manual(
+    values = c('TRUE' = 'red', 'FALSE' = NA),
+    name = "Predicted Target",
+    labels = c('FALSE', 'TRUE')
+  ) +
+  labs(
+    x = "Log fold change",
+    y = "-log(p-value)",
+    title = "Volcano Plot"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+pdf(paste0(outdir, "/Vulcano.pdf"), height = 6, width = 12)
+ vulcano
+ dev.off()
+
+
+```
+
+```{r}
+## comparing scmageck and SCEPTRE. taking along only the overlapping results
+
+#load scmageck results
+scmageck<- readRDS("/g/steinmetz/project/otar/software/BD2.2/full_data_per_panel/results/scmageck_all_panels.rds")
+
+scmageck <- scmageck %>% mutate(significant = padj <= 0.001)
+scmageck <- scmageck%>% mutate(pval_scaled = -log10(padj + 1e-15))
+
+scmageck_significant <- scmageck %>% filter(significant == TRUE, grepl("^chr", guide_target))
+results_df_significant <- results_df %>% filter(significant == TRUE, grepl("^chr", grna_target))
+
+
+scmageck_set <- scmageck_significant %>% 
+  select(guide_target, gene) %>% 
+  unite("key", guide_target, gene, sep = "_")
+
+results_df_set <- results_df_significant %>% 
+  select(grna_target, response_id) %>% 
+  unite("key", `grna_target`, response_id, sep = "_")
+
+scmageck_significant <- scmageck_significant %>%
+  mutate(key = paste(guide_target, gene, sep = "_"))
+
+results_df_significant <- results_df_significant %>%
+  mutate(key = paste(grna_target, response_id, sep = "_"))
+
+
+# Step 3: Find the unique keys in each set
+scmageck_keys <- unique(scmageck_set$key)
+results_df_keys <- unique(results_df_set$key)
+
+# Step 4: Create the Venn diagram
+venn_data <- list(Scmageck = scmageck_keys, Results_df = results_df_keys)
+
+venn.plot <- venn.diagram(
+  x = venn_data,
+  category.names = c("Scmageck", "Sceptre"),
+  filename = NULL,  # Not saving to file, but rendering in the plot window
+  output = TRUE
+)
+
+# Display the Venn diagram using grid.draw
+grid.newpage()
+grid.draw(venn.plot)
+
+
+
+### find the overlap and create correlation plot
+
+overlap_keys <- intersect(scmageck_set$key, results_df_set$key)
+
+# Step 4: Merge the datasets based on overlapping keys
+scmageck_overlap <- scmageck_significant %>%
+  filter(key %in% overlap_keys)
+
+results_df_overlap <- results_df_significant %>%
+  filter(key %in% overlap_keys)
+
+merged_df <- merge(scmageck_overlap, results_df_overlap, by = "key", suffixes = c("_scmageck", "_sceptre"))
+
+# Step 5: Create correlation plots for pval and expression_change
+# Pval correlation plot
+pval_plot <- ggplot(merged_df, aes(x = pval_scaled_scmageck, y = pval_scaled_sceptre)) +
+  geom_point() +
+  geom_smooth(method = "lm", col = "blue") +
+  labs(title = "Correlation of P-values", x = "scmageck P-value", y = "sceptre P-value") +
+  theme_minimal()
+
+
+# Expression change correlation plot
+expr_change_plot <- ggplot(merged_df, aes(x = expr_change, y = log_2_fold_change)) +
+  geom_point() +
+    geom_smooth(method = "lm", formula = y ~ x + 0, col = "blue") +  # Force the line through zero
+  stat_cor(aes(label = paste(..r.label.., ..rr.label.., sep = "~`,`~")), method = "pearson", label.x = 0) +
+  labs(title = "Correlation of Expression Change",
+       x = "Scmageck Expression Change",
+       y = "Sceptre Expression Change") +
+  theme_minimal()
+
+expr_change_plot <- ggplot(merged_df, aes(x = expr_change, y = log_2_fold_change)) +
+  geom_point() +
+  geom_smooth(method = "lm", col = "blue") +
+   stat_cor(aes(label = paste(..r.label.., ..rr.label.., sep = "~`,`~")), method = "pearson", label.x = 0) +
+  labs(title = "Correlation of Expression Change", x = "Scmageck Expression Change", y = "Sceptre Expression Change") +
+  theme_minimal()
+
+# Display the plots
+print(pval_plot)
+print(expr_change_plot)
+
+
+pdf(paste0(outdir, "/sceptre_scmageck_correlation.pdf"), height = 6, width = 12)
+grid.draw(venn.plot)
+pval_plot
+expr_change_plot
+ dev.off()
+
+```
+
+
+```{r}
+#let's look at some gene enrichments?
+
+#load peak data with snps and traits
+peaks <- read_tsv("/g/steinmetz/project/otar/select_enhancer_peaks/Final_peaks_large_screen_2024-03-01.tsv", show_col_types = FALSE)
+
+
+allergic_disease <- peaks %>% filter(trait == "Allergic_disease")
+Ankylosing_spondylitis <-peaks %>% filter(trait == "Ankylosing_spondylitis")
+Asthma <- peaks %>% filter(trait == "Asthma")
+Crohns_disease <-  peaks %>% filter(trait == "Crohns_disease")
+Celiac_disease <-  peaks %>% filter(trait == "Celiac_disease")
+Eczema <-  peaks %>% filter(trait == "Eczema")
+Inflammatory_bowel_disease <-  peaks %>% filter(trait == "Inflammatory_bowel_disease")
+Multiple_sclerosis <-  peaks %>% filter(trait == "Multiple_sclerosis")
+Primary_biliary_cholangitis <-  peaks %>% filter(trait == "Primary_biliary_cholangitis")
+Primary_biliary_cirrhosis <-peaks %>% filter(trait == "Primary_biliary_cirrhosis")
+Primary_sclerosing_cholangitis <-peaks %>% filter(trait == "Primary_sclerosing_cholangitis")
+Psoriasis <-peaks %>% filter(trait == "Psoriasis")
+Rheumatoid_arthritis <-peaks %>% filter(trait == "Rheumatoid_arthritis")
+Systemic_lupus_erythematosus <-peaks %>% filter(trait == "Systemic_lupus_erythematosus")
+Type_1_diabetes <-peaks %>% filter(trait == "Type_1_diabetes")
+Ulcerative_colitis <-peaks %>% filter(trait == "Ulcerative_colitis")
+
+results_df_significant <- results_df%>% filter(significant==TRUE)
+results_df_AD <- results_df %>%  filter(grna_target %in% allergic_disease$peak) %>% filter(significant==TRUE)
+results_df_AS <- results_df %>%  filter(grna_target %in% Ankylosing_spondylitis$peak) %>% filter(significant==TRUE)
+results_df_Ast <- results_df %>%  filter(grna_target %in% Asthma$peak) %>% filter(significant==TRUE)
+results_df_CeD <- results_df %>%  filter(grna_target %in% Celiac_disease$peak) %>% filter(significant==TRUE)
+results_df_CD <- results_df %>%  filter(grna_target %in% Crohns_disease$peak) %>% filter(significant==TRUE)
+results_df_Ecz <- results_df %>%  filter(grna_target %in% Eczema$peak) %>% filter(significant==TRUE)
+results_df_IBD <- results_df %>%  filter(grna_target %in% Inflammatory_bowel_disease$peak) %>% filter(significant==TRUE)
+results_df_MS <- results_df %>%  filter(grna_target %in% Multiple_sclerosis$peak) %>% filter(significant==TRUE)
+results_df_PBCh <- results_df %>%  filter(grna_target %in% Primary_biliary_cholangitis$peak) %>% filter(significant==TRUE)
+results_df_PBC <- results_df %>%  filter(grna_target %in% Primary_biliary_cirrhosis$peak) %>% filter(significant==TRUE)
+results_df_PSC <- results_df %>%  filter(grna_target %in% Primary_sclerosing_cholangitis$peak) %>% filter(significant==TRUE)
+results_df_Psor <- results_df %>%  filter(grna_target %in% Psoriasis$peak) %>% filter(significant==TRUE)
+results_df_RA <- results_df %>%  filter(grna_target %in% Rheumatoid_arthritis$peak) %>% filter(significant==TRUE)
+results_df_SLE <- results_df %>%  filter(grna_target %in% Systemic_lupus_erythematosus$peak) %>% filter(significant==TRUE)
+results_df_T1D <- results_df %>%  filter(grna_target %in% Type_1_diabetes$peak) %>% filter(significant==TRUE)
+results_df_UC <- results_df %>%  filter(grna_target %in% Ulcerative_colitis$peak) %>% filter(significant==TRUE)
+
+gene_list_all<- results_df %>% distinct(gene_id) 
+gene_list_sig <- results_df_significant %>% distinct(gene_id) 
+gene_list_AD <- results_df_AD %>% distinct(gene_id) 
+gene_list_AS <- results_df_AS %>% distinct(gene_id) 
+gene_list_Ast <- results_df_Ast %>% distinct(gene_id) 
+gene_list_CeD <- results_df_CeD %>% distinct(gene_id) 
+gene_list_CD <- results_df_CD %>% distinct(gene_id) 
+gene_list_Ecz <- results_df_Ecz %>% distinct(gene_id) 
+gene_list_IBD <- results_df_IBD %>% distinct(gene_id) 
+gene_list_MS <- results_df_MS %>% distinct(gene_id) 
+gene_list_PBCh <- results_df_PBCh %>% distinct(gene_id) 
+gene_list_PBC <- results_df_PBC %>% distinct(gene_id) 
+gene_list_PSC <- results_df_PSC %>% distinct(gene_id) 
+gene_list_Psor <- results_df_Psor %>% distinct(gene_id) 
+gene_list_RA <- results_df_RA %>% distinct(gene_id) 
+gene_list_SLE <- results_df_SLE %>% distinct(gene_id) 
+gene_list_T1D <- results_df_T1D %>% distinct(gene_id) 
+gene_list_UC <- results_df_UC %>% distinct(gene_id) 
+
+#for the disease that are the same
+gene_list_IBD_UC_CD <- bind_rows(gene_list_IBD, gene_list_UC, gene_list_CD) %>% unique()
+gene_list_PBCh_PBC <- bind_rows(gene_list_PBCh, gene_list_PBC) %>% unique()
+
+```
+
+
+```{r}
+
+gene_lists <- list(
+  significant = gene_list_sig$gene_id,
+  AD = gene_list_AD$gene_id,
+  AS = gene_list_AS$gene_id,
+  Ast = gene_list_Ast$gene_id,
+  CeD = gene_list_CeD$gene_id,
+  CD = gene_list_CD$gene_id,
+  Ecz = gene_list_Ecz$gene_id,
+  IBD = gene_list_IBD$gene_id,
+  MS = gene_list_MS$gene_id,
+  PBCh = gene_list_PBCh$gene_id,
+  PBC = gene_list_PBC$gene_id,
+  PSC = gene_list_PSC$gene_id,
+  Psor = gene_list_Psor$gene_id,
+  RA = gene_list_RA$gene_id,
+  SLE = gene_list_SLE$gene_id,
+  T1D = gene_list_T1D$gene_id,
+  UC = gene_list_UC$gene_id,
+  IBD_UC_CD = gene_list_IBD_UC_CD$gene_id,
+  PBCh_PBC = gene_list_PBCh_PBC$gene_id
+)
+
+all_p_adjust_GO <- c()
+all_p_adjust_KEGG <- c()
+
+# Loop over each gene list to collect p.adjust values
+for (list_name in names(gene_lists)) {
+  gene_list <- gene_lists[[list_name]]
+  
+  # GO enrichment
+  go_enrichment <- enrichGO(
+    gene         = gene_list,
+    OrgDb        = org.Hs.eg.db,
+    ont          = "BP",
+    pAdjustMethod = "BH",
+    universe     = gene_list_all$gene_id,
+    pvalueCutoff  = 0.05,
+    qvalueCutoff  = 0.05,
+    keyType       = 'ENSEMBL',
+    readable      = TRUE
+  )
+  if (!is.null(go_enrichment) && nrow(as.data.frame(go_enrichment)) > 0) {
+    all_p_adjust_GO <- c(all_p_adjust_GO, go_enrichment$p.adjust)
+  }
+  
+  # KEGG enrichment
+  gene_list_entrez <- bitr(gene_list, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  gene_list_all_entrez <- bitr(gene_list_all$gene_id, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  kegg_enrichment <- enrichKEGG(
+    gene         = gene_list_entrez$ENTREZID,
+    organism     = 'hsa',
+    pvalueCutoff = 0.05,
+    universe     = gene_list_all_entrez$ENTREZID,
+    keyType      = 'kegg'
+  )
+  if (!is.null(kegg_enrichment) && nrow(as.data.frame(kegg_enrichment)) > 0) {
+    all_p_adjust_KEGG <- c(all_p_adjust_KEGG, kegg_enrichment$p.adjust)
+  }
+}
+
+# Calculate global min and max p.adjust values
+p_adjust_min_GO <- min(all_p_adjust_GO, na.rm = TRUE)
+p_adjust_max_GO <- max(all_p_adjust_GO, na.rm = TRUE)
+p_adjust_min_KEGG <- min(all_p_adjust_KEGG, na.rm = TRUE)
+p_adjust_max_KEGG <- max(all_p_adjust_KEGG, na.rm = TRUE)
+
+# Step 2: Use these values to create the plots
+
+# Function to perform GO enrichment and plot
+perform_GO_enrichment <- function(gene_list, list_name, p_adjust_min, p_adjust_max) {
+  go_enrichment <- enrichGO(
+    gene         = gene_list,
+    OrgDb        = org.Hs.eg.db,
+    ont          = "BP",
+    pAdjustMethod = "BH",
+    universe     = gene_list_all$gene_id,
+    pvalueCutoff  = 0.05,
+    qvalueCutoff  = 0.05,
+    keyType       = 'ENSEMBL',
+    readable      = TRUE
+  )
+
+  if (nrow(as.data.frame(go_enrichment)) > 0) {
+    plot <- dotplot(go_enrichment, showCategory = 10, title = paste("GO Enrichment -", list_name)) +
+      scale_color_gradient(low = "red", high = "blue", limits = c(p_adjust_min, p_adjust_max))
+    print(plot)  # Print to the PDF
+  } else {
+    message(paste0("No significant GO terms found for ", list_name))
+  }
+}
+
+# Save all GO plots in a single PDF
+pdf(paste0(outdir, "/GO_Enrichment_plots.pdf"), height = 8, width = 10)
+
+# Loop over each gene list and perform GO enrichment analysis
+for (list_name in names(gene_lists)) {
+  gene_list <- gene_lists[[list_name]]
+  
+  perform_GO_enrichment(gene_list, list_name, p_adjust_min_GO, p_adjust_max_GO)
+}
+dev.off()
+
+
+# Function to perform KEGG enrichment and plot
+perform_KEGG_enrichment <- function(gene_list, list_name, p_adjust_min, p_adjust_max) {
+  gene_list_entrez <- bitr(gene_list, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  gene_list_all_entrez <- bitr(gene_list_all$gene_id, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+
+  kegg_enrichment <- enrichKEGG(
+    gene         = gene_list_entrez$ENTREZID,
+    organism     = 'hsa',
+    pvalueCutoff = 0.05,
+    universe     = gene_list_all_entrez$ENTREZID,
+    keyType      = 'kegg'
+  )
+
+  if (nrow(as.data.frame(kegg_enrichment)) > 0) {
+    plot <- dotplot(kegg_enrichment, showCategory = 10, title = paste("KEGG Enrichment -", list_name)) +
+      scale_color_gradient(low = "red", high = "blue", limits = c(p_adjust_min, p_adjust_max))
+    print(plot)  # Print to the PDF
+  } else {
+    message(paste0("No significant KEGG pathways found for ", list_name))
+  }
+}
+
+# Save all KEGG plots in a single PDF
+pdf(paste0(outdir, "/KEGG_Enrichment_plots.pdf"), height = 8, width = 10)
+
+# Loop over each gene list and perform KEGG enrichment analysis
+for (list_name in names(gene_lists)) {
+  gene_list <- gene_lists[[list_name]]
+  
+  perform_KEGG_enrichment(gene_list, list_name, p_adjust_min_KEGG, p_adjust_max_KEGG)
+}
+dev.off()
+
+```
+
+
+getting a list for olink
+```{r}
+validation_list <- results_df %>% 
+  filter(significant==TRUE) %>% 
+  filter(distance >= 5000 | distance <= -5000) %>% 
+  filter(log_2_fold_change >= 0.7 | log_2_fold_change <= -0.7)
+
+unique(validation_list$response_id)
+
+write.csv(validation_list, paste0(outdir, "/validation_list.csv"), row.names = FALSE)
+
+```

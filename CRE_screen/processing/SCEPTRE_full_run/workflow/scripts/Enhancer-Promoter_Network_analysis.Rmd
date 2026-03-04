@@ -1,0 +1,1220 @@
+---
+title: "Enhancer-Promoter Network Analysis"
+author: "Dewi Moonen"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r}
+# set output html chunk options
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+
+```{r attachPackages}
+library(tidyverse)
+library(cowplot)
+library(ggpubr)
+library(igraph)
+library(dplyr)
+
+select <- dplyr::select
+rename <- dplyr::rename
+count <- dplyr::count
+slice <- dplyr::slice
+map <- purrr::map
+mutate <- dplyr::mutate
+filter<-dplyr::filter
+first <-dplyr::first
+components <-igraph::components
+degree <-igraph::degree
+simplify <-igraph::simplify
+source("/g/steinmetz/moonen/Rstudio/theme_manuscript_default.R")
+
+```
+
+load data
+```{r}
+#etp <- read_csv("/g/steinmetz/project/otar_2063/enhancer_screen/interpretation/chromatin_analyses/results/results_df_with_promoterC_annotated_allFeatures_transHits.csv")
+#etp <- read_csv("/g/steinmetz/project/otar_2063/enhancer_screen/interpretation/chromatin_analyses/results/results_df_with_promoterC_annotated_allFeatures.csv")
+#etp<-read_csv("/g/steinmetz/project/otar_2063/enhancer_screen/interpretation/chromatin_analyses/results/share/cre_perturbation_screen_results.csv")
+etp<-read_csv("/g/steinmetz/moonen/Rstudio/cre_perturbation_screen_results_traits.csv")
+
+#discovery_P <-read_tsv("/g/steinmetz/moonen/Rstudio/significant_discovery_pairs.tsv")
+#discovery_P <-read_tsv("/g/steinmetz/project/otar_2063/promoter_screen/interpretation/diff_expr_analyses/process_trans_analysis/sceptre_pvalues/discovery_pairs_significant_fdr001.tsv.gz")
+
+#discovery_P <-read_tsv("/g/steinmetz/project/otar_2063/promoter_screen/interpretation/diff_expr_analyses/process_trans_analysis/gene_level_empirical_pvalues/upsample_nt_pvals/discovery_pairs_empirical_pvalues.tsv.gz")
+#discovery_P <-read_tsv("/g/steinmetz/project/otar_2063/promoter_screen/interpretation/diff_expr_analyses/process_trans_analysis/gene_level_empirical_pvalues/significant_trans_pairs_per_gene_fdr.tsv.gz")
+
+
+
+#positive_C <-read_tsv("/g/steinmetz/moonen/Rstudio/positive_controls.tsv")
+#positive_C <-read_tsv("/g/steinmetz/project/otar_2063/promoter_screen/interpretation/diff_expr_analyses/process_trans_analysis/sceptre_pvalues/positive_control_results.tsv.gz")
+
+#positive_C <-read_tsv("/g/steinmetz/project/otar_2063/promoter_screen/interpretation/diff_expr_analyses/process_trans_analysis/gene_level_empirical_pvalues/upsample_nt_pvals/positive_control_pairs_empirical_pvalues.tsv.gz")
+#positive_C <-read_tsv("/g/steinmetz/project/otar_2063/promoter_screen/interpretation/diff_expr_analyses/process_trans_analysis/gene_level_empirical_pvalues/positive_control_pairs_empirical_pvalues.tsv.gz")
+
+#filter discovery list to get cleaner network
+#discovery_P <- discovery_P%>% filter(pval_adj_per_gene<=0.1, abs(log_2_fold_change) >= 0.1)
+
+#discovery_P_full  <-read_tsv("/g/steinmetz/project/otar_2063/promoter_screen/interpretation/diff_expr_analyses/process_trans_analysis/sceptre_pvalues/discovery_pairs_significant_fdr001.tsv.gz" )
+#positive_C_full  <-read_tsv("/g/steinmetz/project/otar_2063/promoter_screen/interpretation/diff_expr_analyses/process_trans_analysis/sceptre_pvalues/positive_control_results.tsv.gz" )
+
+#discovery from Stefan
+#folder_path <- "/g/stegle/schrod/code/TCell/results_pseudobulk/DEG_bulk_1_and_2_guides_15_nt"
+#folder_path <- "/g/stegle/schrod/code/TCell/results/DEG"
+
+folder_path <- "/g/stegle/schrod/code/TCell/pseudobulk_deseq2_chunks50_min3bulks_ribosomal"
+discovery_P <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE) %>%
+  map_df(read_csv)
+
+discovery_P <- discovery_P %>% mutate(grna_target = contrast, gene_symbol = variable, log_2_fold_change = log_fc, pvals_adj = adj_p_value) %>% filter(pvals_adj <=0.1 , abs(log_2_fold_change) >= 0.1)
+
+positive_C <- discovery_P%>%
+  filter(gene_symbol == grna_target, 
+    !is.na(log_2_fold_change),
+    log_2_fold_change < 0) %>%
+  pull(gene_symbol) %>%
+  unique()
+
+pos_neg_genes <- positive_C
+```
+
+create ETP list to use 
+```{r}
+# for control perturbations which were in multiple panels, select the most significant one
+etp_ctrl <- etp %>% 
+  filter(ctrl_perturbation == TRUE) %>% 
+  group_by(response_id, grna_target) %>% 
+  slice_min(p_value, n = 1, with_ties = FALSE)
+
+# add back to results table with discovery pairs, filter for specific disease. 
+etp <- etp %>% 
+ # filter(str_detect(trait, "Inflammatory_bowel_disease")) %>%
+  filter(ctrl_perturbation == FALSE) %>% 
+  bind_rows(etp_ctrl) %>% 
+  arrange(desc(p_value))
+
+etp <- etp %>% 
+  filter(pert_chr == gene_chr)  %>%
+    filter(ctrl_perturbation == FALSE) %>% 
+    filter(significant  == TRUE) %>%
+    filter(enhancer_like_interaction==TRUE) %>%
+    filter(abs(dist_to_tss) <=1000000)
+  
+# extract features for significant ETPs
+features <- c("log_2_fold_change")
+
+etp_feat <- etp %>% 
+  select(response_id, grna_target, interaction_type, significant, dist_to_tss, ctrl_perturbation,
+         all_of(features)) %>% 
+  pivot_longer(cols = all_of(features), names_to = "feature", values_to = "value") %>% 
+  mutate(dist_to_tss = abs(dist_to_tss))
+
+# reformat feature names for plot
+etp_feat <- etp_feat %>% 
+  mutate(feature = case_when(
+    feature == "log_2_fold_change" ~ "Effect size",
+    feature == "hic_int_freq" ~ "Hi-C 3D contact",
+    TRUE ~ sub(".+_(.+)", "\\1", feature)
+  ))
+
+# convert classes to factors for correct ordering
+class_levels <- c("promoter-proximal", "promoter-distal", "intragenic-proximal",
+                  "intragenic-distal","intergenic-distal")
+etp_feat <- etp_feat %>% 
+  mutate(interaction_type = factor(interaction_type, levels = rev(class_levels)))
+
+# extract positive hits only for plots
+etp_feat_sig <- filter(etp_feat, significant == TRUE & ctrl_perturbation==FALSE)
+
+# add effect size as separate column
+etp_feat_sig <- etp_feat_sig %>% 
+  filter(feature == "Effect size") %>% 
+  select(response_id, grna_target, effect_size = value) %>%
+  left_join(etp_feat_sig, ., by = c("response_id", "grna_target"))
+
+# add group for coloring based on element location
+etp_feat_sig <- mutate(etp_feat_sig, class_color = interaction_type)
+ 
+
+```
+
+
+```{r}
+# colors for each class
+class_colors <- c(
+  "promoter-proximal" = "#0263a3",        #9ad8fc
+  "promoter-distal" = "#9ad8fc",  #6ebff5 
+  "intragenic-proximal" ="#c62828",#"#daa520",
+  "intragenic-distal" = "#e57373", #f2c94c",
+  "intergenic-distal"= "goldenrod" #daa520"
+)
+```
+
+create full network 
+```{r}
+
+es_dat <- filter(etp_feat_sig, feature == "Effect size")
+
+# Unique CRE–gene–class pairs from es_dat
+es_pairs <- es_dat %>%
+  distinct(
+    es_grna_target   = grna_target,
+    es_response_id   = response_id,
+    interaction_type,
+    effect_size
+  )
+
+# edges1: CRE -> primary gene
+edges1 <- es_pairs %>%
+  transmute(
+    from       = es_grna_target,
+    to         = es_response_id,
+    log2fc     = effect_size,  # or abs(effect_size) later for width
+    edge_type  = "CRE_to_gene",
+   edge_class = as.character(interaction_type),
+    edge_color = class_colors[as.character(interaction_type)]
+  )
+# join es_pairs (primary gene) to discovery_P (grna_target)
+matches <- es_pairs %>%
+  inner_join(
+    discovery_P %>%
+      select(grna_target, gene_symbol, log_2_fold_change),
+    by = c("es_response_id" = "grna_target")
+  )
+
+# edges2: primary gene -> downstream gene_symbol
+edges2 <- matches %>%
+  transmute(
+    from       = es_response_id,
+    to         = gene_symbol,
+    log2fc     = log_2_fold_change,
+    edge_type  = "gene_to_gene",
+    edge_class = NA_character_,
+    edge_color = NA_character_
+  )
+
+
+# map_dp <- discovery_P %>%
+#   select(grna_target, gene_symbol, log_2_fold_change)
+# 
+# frontier <- matches %>%
+#   select(from = gene_symbol) %>%   # start from downstream genes
+#   distinct()
+# 
+# all_follow_edges <- tibble(
+#   from      = character(),
+#   to        = character(),
+#   log2fc    = numeric(),
+#   edge_type = character()
+# )
+# 
+# seen <- frontier$from
+# 
+# repeat {
+#   step <- frontier %>%
+#     inner_join(map_dp, by = c("from" = "grna_target")) %>%
+#     transmute(
+#       from,
+#       to        = gene_symbol,
+#       log2fc    = log_2_fold_change,
+#       edge_type = "dp_chain"
+#     ) %>%
+#     distinct()
+# 
+#   if (nrow(step) == 0) break
+# 
+#   all_follow_edges <- bind_rows(all_follow_edges, step)
+# 
+#   new_nodes <- setdiff(step$to, seen)
+#   if (length(new_nodes) == 0) break
+# 
+#   frontier <- tibble(from = new_nodes)
+#   seen <- union(seen, new_nodes)
+# }
+
+# recursive downstream chains
+#edges3_recursive <- all_follow_edges %>%
+#  mutate(
+#    edge_class = NA_character_,
+#    edge_color = NA_character_
+#  )
+
+map_dp <- discovery_P %>%
+  select(grna_target, gene_symbol, log_2_fold_change)
+
+frontier <- matches %>%
+  select(from = gene_symbol) %>%   # start from downstream genes
+  distinct()
+
+all_follow_edges <- tibble(
+  from      = character(),
+  to        = character(),
+  log2fc    = numeric(),
+  edge_type = character(),
+  depth     = integer()            # optional: track hop number
+)
+
+seen <- frontier$from
+
+max_steps <- 1
+
+for (d in seq_len(max_steps)) {
+
+  step <- frontier %>%
+    inner_join(map_dp, by = c("from" = "grna_target")) %>%
+    transmute(
+      from,
+      to        = gene_symbol,
+      log2fc    = log_2_fold_change,
+      edge_type = "dp_chain",
+      depth     = d
+    ) %>%
+    distinct()
+
+  if (nrow(step) == 0) break
+
+  all_follow_edges <- bind_rows(all_follow_edges, step)
+
+  new_nodes <- setdiff(step$to, seen)
+  if (length(new_nodes) == 0) break
+
+  frontier <- tibble(from = new_nodes)
+  seen <- union(seen, new_nodes)
+}
+
+# limited downstream chains (<= 3 hops)
+edges3_limited <- all_follow_edges %>%
+  select(-depth) %>%               # keep depth if you want it later
+  mutate(
+    edge_class = NA_character_,
+    edge_color = NA_character_
+  )
+####until here for iterative
+
+
+#edge_list <- bind_rows(edges1, edges2, edges3_recursive) %>%
+edge_list <- bind_rows(edges1, edges2, edges3_limited) %>%
+  group_by(from, to) %>%
+  summarise(
+    log2fc     = first(log2fc),
+    edge_type  = paste(unique(edge_type), collapse = ";"),
+    edge_class = first(na.omit(edge_class)),
+    edge_color = first(na.omit(edge_color)),
+    .groups    = "drop"
+  )
+
+nodes <- tibble(name = unique(c(edge_list$from, edge_list$to))) %>%
+  mutate(
+    type = case_when(
+      name %in% es_pairs$es_grna_target ~ "CRE",
+      TRUE                              ~ "gene"
+    )
+  )
+
+# Identify self-targeting genes in discovery_P
+self_target_genes <- discovery_P %>%
+  filter(grna_target == gene_symbol) %>%
+  pull(gene_symbol) %>%
+  unique()
+
+# Update node types
+nodes <- tibble(name = unique(c(edge_list$from, edge_list$to))) %>%
+  mutate(
+    type = case_when(
+      name %in% es_pairs$es_grna_target ~ "CRE",          # CREs
+      name %in% pos_neg_genes           ~ "pos_neg_gene", # positive controls: sig & negative
+      TRUE                              ~ "gene"          # all other genes
+    )
+  )
+
+edge_list <- edge_list %>%
+  filter(from != to)
+
+g <- graph_from_data_frame(edge_list, directed = TRUE, vertices = nodes)
+
+# Edge colors: class_colors for CRE->gene, grey otherwise
+E(g)$color <- ifelse(!is.na(E(g)$edge_color), E(g)$edge_color, "grey60")
+
+# Edge widths: scale |log2fc|, but note edges1 now use effect_size
+E(g)$width <- rescale(abs(E(g)$log2fc), to = c(1, 6))
+
+color_map <- c(
+  CRE          = "#c03a30",
+  gene         = "#848484",
+  pos_neg_gene = "#334068"
+)
+
+
+
+V(g)$shape <- "circle"
+V(g)$color <- color_map[V(g)$type]
+V(g)$size  <- 3
+
+plot(
+  g,
+  vertex.label  = NA,
+  edge.arrow.size = 0.01,
+  layout = layout_with_fr(g)
+)
+```
+
+filter for only those networks that have at least 1 CRE, and for those genes that have an effect on itself (control genes), but keep non-control genes when its an end node. 
+```{r}
+## 1. Split edges into CRE→gene vs gene→gene -------------------------------
+
+# assumes you set edge_type when building the graph:
+#   "CRE_to_gene"  for CRE -> primary gene
+#   "gene_to_gene" and "dp_chain" for gene -> gene edges
+
+is_cre_edge <- E(g)$edge_type == "CRE_to_gene"
+
+cre_gene_edges  <- E(g)[is_cre_edge]         # keep ALL of these
+non_cre_edges   <- E(g)[!is_cre_edge]        # gene→gene edges (and similar)
+
+
+## 2. From gene→gene edges, keep only those where the source is green -----
+
+gene_edges_keep <- non_cre_edges[0]  # empty by default
+
+if (length(non_cre_edges) > 0) {
+  # ends() gives from/to vertex indices if names = FALSE
+  non_cre_ends <- ends(g, non_cre_edges, names = FALSE)
+  from_idx     <- non_cre_ends[, 1]
+
+  # assume green genes were tagged as type == "pos_neg_gene"
+  is_from_green <- V(g)$type[from_idx] == "pos_neg_gene"
+
+  gene_edges_keep <- non_cre_edges[is_from_green]
+}
+
+# all edges we want to keep
+edges_keep <- c(cre_gene_edges, gene_edges_keep)
+
+
+## 3. Build subgraph from these edges, dropping isolated nodes ------------
+
+g_edges <- subgraph.edges(g, e = edges_keep, delete.vertices = TRUE)
+
+
+## 4. Keep only components with at least one CRE AND at least one gene ----
+
+comp <- components(g_edges)
+
+comp_has_cre <- tapply(V(g_edges)$type == "CRE",
+                       comp$membership, any)
+
+comp_has_gene <- tapply(V(g_edges)$type %in% c("gene", "pos_neg_gene"),
+                        comp$membership, any)
+
+comps_to_keep <- which(comp_has_cre & comp_has_gene)
+
+verts_keep <- V(g_edges)[comp$membership %in% comps_to_keep]
+
+g_final <- induced_subgraph(g_edges, vids = verts_keep)
+
+
+## 5. Plot -----------------------------------------------------------------
+
+# Kamada-Kawai – often the most balanced
+#coords <- layout_with_kk(g_final)
+
+# Graphopt – good for large networks
+#coords <- layout_with_graphopt(g_final)
+
+coords <-layout_with_fr(g_final)
+
+
+# DrL – scalable for big graphs, hierarchical feel
+#coords <- layout_with_drl(g_final)
+
+plot(
+  g_final,
+  layout            = coords,
+  vertex.label      = NA,
+  vertex.size       = V(g_final)$size,
+  vertex.color      = V(g_final)$color,
+  vertex.frame.color = NA,
+  edge.color        = E(g_final)$color,
+  edge.width        = E(g_final)$width,
+  edge.arrow.size   = 0.01
+)
+
+## 3. Centrality & core genes (on g_clean!) ----
+# centrality
+V(g_final)$degree      <- degree(g_final, mode = "all")
+V(g_final)$betweenness <- betweenness(g_final, directed = TRUE, normalized = TRUE)
+V(g_final)$eigen       <- evcent(g_final, directed = TRUE)$vector
+
+# genes only (exclude CREs)
+gene_nodes <- V(g_final)[V(g_final)$type %in% c("gene", "pos_neg_gene")]
+
+# robust top 10% by degree: pick an explicit number of nodes
+n_genes   <- length(gene_nodes)
+n_core    <- max(1, ceiling(0.3 * n_genes))  # at least 1
+ord_deg   <- order(gene_nodes$degree, decreasing = TRUE, na.last = NA)
+core_genes <- gene_nodes[ ord_deg[seq_len(n_core)] ]
+
+## 4. Labels only for core genes ----
+V(g_final)$label <- NA                     # clear all labels
+V(g_final)$label[core_genes] <- V(g_final)$name[core_genes]  # label only cores
+
+plot(
+  g_final,
+  layout               = coords,
+
+  # vertices
+  vertex.label         = V(g_final)$label,
+  vertex.label.cex     = 0.7,
+  vertex.label.color   = "black",
+  vertex.label.family  = "Arial",
+  vertex.label.degree  = -pi / 2,   # label below node
+  vertex.label.dist    = 0.5,
+
+  vertex.size          = V(g_final)$size,
+  vertex.color         = V(g_final)$color,
+  vertex.frame.color   = NA,
+
+  # edges
+  edge.color           = E(g_final)$color,
+  edge.width           = E(g_final)$width,
+  edge.arrow.size      = 0.01
+)
+```
+
+
+keep only networks that include both CRE->gene and gene->gene connections. 
+```{r}
+## 1–2. Directional filter: keep only components with CRE->gene->gene ----
+comp <- components(g_final, mode = "weak")  # component membership ignoring direction
+comp_ids <- sort(unique(comp$membership))
+
+comp_keep <- sapply(comp_ids, function(cid) {
+  vids <- V(g_final)[comp$membership == cid]
+  sg   <- induced_subgraph(g_final, vids = vids)
+
+  # CRE -> gene edges
+  e_cre <- E(sg)[E(sg)$edge_type == "CRE_to_gene"]
+  if (length(e_cre) == 0) return(FALSE)
+
+  # genes that are targets of CREs (middle node in CRE->gene->gene)
+  middle_genes <- unique(ends(sg, e_cre, names = FALSE)[, 2])
+
+  # gene -> gene edges
+  e_gg <- E(sg)[E(sg)$edge_type %in% c("gene_to_gene", "dp_chain")]
+  if (length(e_gg) == 0) return(FALSE)
+
+  gg_from <- ends(sg, e_gg, names = FALSE)[, 1]
+
+  # directional requirement: some CRE-targeted gene is the SOURCE of a gene->gene edge
+  any(gg_from %in% middle_genes)
+})
+
+comps_keep <- comp_ids[comp_keep]
+verts_keep <- V(g_final)[comp$membership %in% comps_keep]
+
+g_clean <- induced_subgraph(g_final, vids = verts_keep)
+
+
+## 3. Centrality & core genes (on g_clean) ----
+V(g_clean)$degree      <- degree(g_clean, mode = "all")
+V(g_clean)$betweenness <- betweenness(g_clean, directed = TRUE, normalized = TRUE)
+V(g_clean)$eigen       <- evcent(g_clean, directed = TRUE)$vector
+
+# genes only (exclude CREs)
+gene_nodes <- V(g_clean)[V(g_clean)$type %in% c("gene", "pos_neg_gene")]
+
+# robust core selection (safe against NA degrees / empty sets)
+core_genes <- V(g_clean)[0]  # default empty
+
+if (length(gene_nodes) > 0) {
+  ord_deg <- order(gene_nodes$degree, decreasing = TRUE, na.last = NA)
+  n_rankable <- length(ord_deg)
+
+  if (n_rankable > 0) {
+    n_core <- max(1, ceiling(1 * length(gene_nodes)))  # your setting
+    n_core <- min(n_core, n_rankable)                  # critical fix
+    core_genes <- gene_nodes[ ord_deg[seq_len(n_core)] ]
+  }
+}
+
+
+## 4. Labels only for core genes ----
+V(g_clean)$label <- NA
+# V(g_clean)$label[core_genes] <- V(g_clean)$name[core_genes]
+
+
+## 5. Plot ----
+coords <- layout_with_fr(g_clean, niter = 3000)
+
+plot(
+  g_clean,
+  layout               = coords,
+
+  vertex.label         = V(g_clean)$label,
+  vertex.label.cex     = 0.7,
+  vertex.label.color   = "black",
+  vertex.label.family  = "Arial",
+  vertex.label.degree  = -pi / 2,
+  vertex.label.dist    = 0.5,
+
+  vertex.size          = V(g_clean)$size,
+  vertex.color         = V(g_clean)$color,
+  vertex.frame.color   = NA,
+
+  edge.color           = E(g_clean)$color,
+  edge.width           = E(g_clean)$width,
+  edge.arrow.size      = 0.01
+)
+
+```
+
+remove end nodes (e.g. genes with only 1 incoming connection and no outgoing connection). not itterative
+```{r}
+## --- ONE-PASS filter: create g_clean2 (do NOT modify g_clean) ----
+# one-pass: drop nodes with ONLY 1 incoming connection (and no outgoing)
+indeg  <- degree(g_clean, mode = "in")
+outdeg <- degree(g_clean, mode = "out")
+
+verts_drop <- which(indeg == 1 & outdeg == 0)
+
+g_clean2 <- delete_vertices(g_clean, verts_drop)
+
+## --- Centrality & core genes (on g_clean2) ----
+V(g_clean2)$degree      <- degree(g_clean2, mode = "all")
+V(g_clean2)$betweenness <- betweenness(g_clean2, directed = TRUE, normalized = TRUE)
+V(g_clean2)$eigen       <- evcent(g_clean2, directed = TRUE)$vector
+
+gene_nodes <- V(g_clean2)[V(g_clean2)$type %in% c("gene", "pos_neg_gene")]
+
+n_genes <- length(gene_nodes)
+n_core  <- max(1, ceiling(1 * n_genes))  # keeping your setting
+
+ord_deg     <- order(gene_nodes$degree, decreasing = TRUE, na.last = NA)
+core_genes2 <- gene_nodes[ ord_deg[seq_len(n_core)] ]
+
+## --- Labels only for core genes (on g_clean2) ----
+V(g_clean2)$label <- NA
+# V(g_clean2)$label[core_genes2] <- V(g_clean2)$name[core_genes2]
+
+## --- Plot g_clean2 ----
+coords2 <- layout_with_fr(g_clean2, niter = 3000)
+
+plot(
+  g_clean2,
+  layout               = coords2,
+
+  # vertices
+  vertex.label         = V(g_clean2)$label,
+  vertex.label.cex     = 0.7,
+  vertex.label.color   = "black",
+  vertex.label.family  = "Arial",
+  vertex.label.degree  = -pi / 2,
+  vertex.label.dist    = 0.5,
+
+  vertex.size          = V(g_clean2)$size,
+  vertex.color         = V(g_clean2)$color,
+  vertex.frame.color   = NA,
+
+  # edges
+  edge.color           = E(g_clean2)$color,
+  edge.width           = E(g_clean2)$width,
+  edge.arrow.size      = 0.01
+)
+
+```
+
+
+remove end nodes itterative
+
+```{r}
+## --- ITERATIVE filter (starting from g_clean): drop genes with ONLY 1 incoming and 0 outgoing ----
+drop_one_in_only_iter <- function(g,
+                                 gene_types = c("gene", "pos_neg_gene"),
+                                 remove_non_genes = FALSE,
+                                 verbose = TRUE) {
+
+  step <- 0
+  repeat {
+    step <- step + 1
+
+    indeg  <- degree(g, mode = "in")
+    outdeg <- degree(g, mode = "out")
+
+    is_gene <- V(g)$type %in% gene_types
+
+    if (remove_non_genes) {
+      # apply rule to all nodes
+      to_drop <- which(indeg == 1 & outdeg == 0)
+    } else {
+      # apply rule only to genes (recommended)
+      to_drop <- which(is_gene & indeg == 1 & outdeg == 0)
+    }
+
+    if (length(to_drop) == 0) {
+      if (verbose) message("Done after ", step - 1, " iteration(s).")
+      break
+    }
+
+    if (verbose) message("Iter ", step, ": removing ", length(to_drop), " node(s).")
+    g <- delete_vertices(g, to_drop)
+  }
+
+  g
+}
+
+# Run it (starting from g_clean)
+g_clean2_iter <- drop_one_in_only_iter(g_clean, verbose = TRUE)
+
+## --- Centrality (on g_clean2_iter) ----
+V(g_clean2_iter)$degree      <- degree(g_clean2_iter, mode = "all")
+V(g_clean2_iter)$betweenness <- betweenness(g_clean2_iter, directed = TRUE, normalized = TRUE)
+V(g_clean2_iter)$eigen       <- evcent(g_clean2_iter, directed = TRUE)$vector
+
+## --- Labels (same behavior as you had; currently none) ----
+V(g_clean2_iter)$label <- NA
+# (optional) label genes:
+# gene_nodes2 <- V(g_clean2_iter)[V(g_clean2_iter)$type %in% c("gene","pos_neg_gene")]
+# V(g_clean2_iter)$label[gene_nodes2] <- V(g_clean2_iter)$name[gene_nodes2]
+
+## --- Plot g_clean2_iter ----
+coords2 <- layout_with_fr(g_clean2_iter, niter = 3000)
+
+plot(
+  g_clean2_iter,
+  layout               = coords2,
+
+  vertex.label         = V(g_clean2_iter)$label,
+  vertex.label.cex     = 0.7,
+  vertex.label.color   = "black",
+  vertex.label.family  = "Arial",
+  vertex.label.degree  = -pi / 2,
+  vertex.label.dist    = 0.5,
+
+  vertex.size          = V(g_clean2_iter)$size,
+  vertex.color         = V(g_clean2_iter)$color,
+  vertex.frame.color   = NA,
+
+  edge.color           = E(g_clean2_iter)$color,
+  edge.width           = E(g_clean2_iter)$width,
+  edge.arrow.size      = 0.01
+)
+
+```
+
+
+remove genes with a single incoming or outgoing edge (itterative)
+```{r}
+## --- ITERATIVE filter (starting from g_clean):
+##     drop genes with (indeg==1 & outdeg==0) OR (indeg==0 & outdeg==1) ----
+drop_gene_leaves_iter <- function(g,
+                                 gene_types = c("gene", "pos_neg_gene"),
+                                 verbose = TRUE) {
+
+  iter <- 0
+  repeat {
+    iter <- iter + 1
+
+    indeg  <- degree(g, mode = "in")
+    outdeg <- degree(g, mode = "out")
+
+    is_gene <- V(g)$type %in% gene_types
+
+    # Rule A: exactly one incoming, zero outgoing
+    drop_in_only  <- is_gene & indeg == 1 & outdeg == 0
+
+    # Rule B: exactly one outgoing, zero incoming
+    drop_out_only <- is_gene & indeg == 0 & outdeg == 1
+
+    to_drop <- which(drop_in_only | drop_out_only)
+
+    if (length(to_drop) == 0) {
+      if (verbose) message("Done after ", iter - 1, " iteration(s).")
+      break
+    }
+
+    if (verbose) message("Iter ", iter, ": removing ", length(to_drop), " node(s).")
+    g <- delete_vertices(g, to_drop)
+  }
+
+  g
+}
+
+# Run it (starting from g_clean)
+g_clean2_iter <- drop_gene_leaves_iter(g_clean, verbose = TRUE)
+
+## --- Centrality (on g_clean2_iter) ----
+V(g_clean2_iter)$degree      <- degree(g_clean2_iter, mode = "all")
+V(g_clean2_iter)$betweenness <- betweenness(g_clean2_iter, directed = TRUE, normalized = TRUE)
+V(g_clean2_iter)$eigen       <- evcent(g_clean2_iter, directed = TRUE)$vector
+
+## --- Labels (same behavior as before; currently none) ----
+#V(g_clean2_iter)$label <- NA
+# Optional: label genes
+ gene_nodes2 <- V(g_clean2_iter)[V(g_clean2_iter)$type %in% c("gene","pos_neg_gene")]
+ V(g_clean2_iter)$label[gene_nodes2] <- V(g_clean2_iter)$name[gene_nodes2]
+
+## --- Plot g_clean2_iter ----
+coords2 <- layout_with_fr(g_clean2_iter, niter = 3000)
+
+plot(
+  g_clean2_iter,
+  layout               = coords2,
+
+  vertex.label         = V(g_clean2_iter)$label,
+  vertex.label.cex     = 0.7,
+  vertex.label.color   = "black",
+  vertex.label.family  = "Arial",
+  vertex.label.degree  = -pi / 2,
+  vertex.label.dist    = 0.5,
+
+  vertex.size          = V(g_clean2_iter)$size,
+  vertex.color         = V(g_clean2_iter)$color,
+  vertex.frame.color   = NA,
+
+  edge.color           = E(g_clean2_iter)$color,
+  edge.width           = E(g_clean2_iter)$width,
+  edge.arrow.size      = 0.01
+)
+
+```
+
+
+```{r}
+
+## ------------------------------------------------------------------
+## CLEAN + THIN + 3-LAYER LAYOUT (CRE left, primary middle, downstream right)
+## starting from: g_clean
+## ------------------------------------------------------------------
+
+library(igraph)
+library(dplyr)
+
+## 0) Sanity: remove loops (optional but recommended)
+g_clean <- simplify(g_clean, remove.loops = TRUE, remove.multiple = FALSE)
+
+## 1) Robustly identify CRE->gene edges (handles concatenated edge_type strings)
+is_cre_edge <- grepl("CRE_to_gene", E(g_clean)$edge_type)
+
+## If you accidentally filtered out CRE edges earlier, this will warn you
+n_cre_edges <- sum(is_cre_edge)
+message("CRE_to_gene edges in g_clean: ", n_cre_edges)
+if (n_cre_edges == 0) {
+  warning("No CRE_to_gene edges found in g_clean. Check earlier filtering (use grepl not ==).")
+}
+
+## 2) Primary targets = 'to' nodes of CRE->gene edges
+cre_eids <- E(g_clean)[is_cre_edge]
+primary_targets <- unique(ends(g_clean, cre_eids, names = TRUE)[, 2])
+
+message("Primary targets found: ", length(primary_targets))
+
+## 3) Define downstream “end nodes” as sinks among genes (out-degree == 0)
+gene_vids <- V(g_clean)[V(g_clean)$type %in% c("gene", "pos_neg_gene")]
+gene_sink_names <- gene_vids$name[degree(g_clean, v = gene_vids, mode = "out") == 0]
+
+message("Gene sinks (out-degree==0): ", length(gene_sink_names))
+
+## 4) Keep rule:
+##    - keep ALL CRE nodes
+##    - keep ALL primary targets
+##    - keep ALL sinks (end nodes)
+##    - keep downstream nodes within k steps from any primary target
+k <- 2  # <- tune this: 1 is very tight, 2 usually good, 3 can blow up fast
+
+if (length(primary_targets) > 0) {
+  neigh_k <- ego(g_clean, order = k, nodes = primary_targets, mode = "out")
+  downstream_k_names <- unique(V(g_clean)[unlist(neigh_k)]$name)
+} else {
+  downstream_k_names <- character()
+}
+
+keep_names <- unique(c(
+  V(g_clean)[V(g_clean)$type == "CRE"]$name,
+  primary_targets,
+  gene_sink_names,
+  downstream_k_names
+))
+
+g_layered <- induced_subgraph(g_clean, vids = V(g_clean)[name %in% keep_names])
+
+message("Nodes kept for layered plot: ", vcount(g_layered))
+message("Edges kept for layered plot: ", ecount(g_layered))
+
+## 5) Assign 3 layers on the reduced graph:
+##    1 = CRE
+##    2 = primary target (incoming CRE edge)
+##    3 = downstream (everything else)
+is_cre_edge2 <- grepl("CRE_to_gene", E(g_layered)$edge_type)
+cre_eids2 <- E(g_layered)[is_cre_edge2]
+primary2 <- unique(ends(g_layered, cre_eids2, names = TRUE)[, 2])
+
+V(g_layered)$layer <- case_when(
+  V(g_layered)$type == "CRE" ~ 1L,
+  V(g_layered)$name %in% primary2 ~ 2L,
+  TRUE ~ 3L
+)
+
+message("Layer counts: ", paste(names(table(V(g_layered)$layer)),
+                               table(V(g_layered)$layer),
+                               collapse = ", "))
+
+## 6) Build a nice 3-layer layout:
+##    - use FR for vertical “structure”
+##    - force x = layer
+##    - spread y evenly within each layer (prevents stacking)
+pad_x   <- 6    # spacing between layers
+pad_y   <- 1.2  # vertical spacing within each layer
+jitter_y <- 0.10
+
+base <- layout_with_fr(g_layered, niter = 2000)
+
+coords <- base
+coords[, 1] <- V(g_layered)$layer * pad_x
+
+coords[, 2] <- ave(
+  base[, 2],
+  V(g_layered)$layer,
+  FUN = function(z) {
+    n <- length(z)
+    # order by FR y, then place on evenly spaced rails
+    ord <- order(z, decreasing = FALSE, na.last = NA)
+    y <- ((seq_len(n) - (n + 1) / 2) * pad_y)
+    # return in original vertex order
+    out <- numeric(n)
+    out[ord] <- y
+    out
+  }
+)
+
+# optional tiny jitter so nodes don't sit on perfectly straight lines
+set.seed(1)
+coords[, 2] <- coords[, 2] + runif(vcount(g_layered), -jitter_y, jitter_y)
+
+## 7) Plot
+plot(
+  g_layered,
+  layout               = coords,
+
+  vertex.label         = V(g_layered)$label,  # keep your existing labels if set; else NA
+  vertex.label.cex     = 0.7,
+  vertex.label.color   = "black",
+  vertex.label.family  = "Arial",
+  vertex.label.degree  = -pi / 2,
+  vertex.label.dist    = 0.5,
+
+  vertex.size          = V(g_layered)$size,
+  vertex.color         = V(g_layered)$color,
+  vertex.frame.color   = NA,
+
+  edge.color           = E(g_layered)$color,
+  edge.width           = E(g_layered)$width,
+  edge.arrow.size      = 0.01,
+  edge.curved          = 0.15,
+
+  asp = 0
+)
+
+## ------------------------------------------------------------------
+## Notes for tuning:
+## - If layer 3 is still huge, reduce k to 1.
+## - If it's too sparse, increase k to 3 (careful: can explode).
+## - Increase pad_y if layer 3 nodes overlap too much.
+## - Increase pad_x if layers feel too close.
+## ------------------------------------------------------------------
+
+
+```
+
+ Do the same 3 networks for Stefan's data
+ 
+```{r}
+pos_neg_genes_S <- discovery_P_S%>%
+  filter(gene_symbol == grna_target, 
+    !is.na(log_2_fold_change),
+    log_2_fold_change < 0) %>%
+  pull(gene_symbol) %>%
+  unique()
+
+# join es_pairs (primary gene) to discovery_P_S (grna_target)
+matches_S <- es_pairs %>%
+  inner_join(
+    discovery_P_S %>%
+      select(grna_target, gene_symbol, log_2_fold_change),
+    by = c("es_response_id" = "grna_target")
+  )
+
+edges2_S <- matches_S %>%
+  transmute(
+    from       = es_response_id,
+    to         = gene_symbol,
+    log2fc     = log_2_fold_change,
+    edge_type  = "gene_to_gene",
+    edge_class = NA_character_,
+    edge_color = NA_character_
+  )
+
+map_dp_S <- discovery_P_S %>%
+  select(grna_target, gene_symbol, log_2_fold_change)
+
+frontier_S <- matches_S %>%
+  select(from = gene_symbol) %>%   # start from downstream genes
+  distinct()
+
+all_follow_edges_S <- tibble(
+  from      = character(),
+  to        = character(),
+  log2fc    = numeric(),
+  edge_type = character()
+)
+
+seen_S <- frontier_S$from
+
+repeat {
+  step_S <- frontier_S %>%
+    inner_join(map_dp_S, by = c("from" = "grna_target")) %>%
+    transmute(
+      from,
+      to        = gene_symbol,
+      log2fc    = log_2_fold_change,
+      edge_type = "dp_chain"
+    ) %>%
+    distinct()
+
+  if (nrow(step_S) == 0) break
+
+  all_follow_edges_S <- bind_rows(all_follow_edges_S, step_S)
+
+  new_nodes_S <- setdiff(step_S$to, seen_S)
+  if (length(new_nodes_S) == 0) break
+
+  frontier_S <- tibble(from = new_nodes_S)
+  seen_S <- union(seen_S, new_nodes_S)
+}
+
+edges3_recursive_S <- all_follow_edges_S %>%
+  mutate(
+    edge_class = NA_character_,
+    edge_color = NA_character_
+  )
+
+edge_list_S <- bind_rows(edges1, edges2_S, edges3_recursive_S) %>%
+  group_by(from, to) %>%
+  summarise(
+    log2fc     = first(log2fc),
+    edge_type  = paste(unique(edge_type), collapse = ";"),
+    edge_class = first(na.omit(edge_class)),
+    edge_color = first(na.omit(edge_color)),
+    .groups    = "drop"
+  ) %>%
+  filter(
+    !(from == to & from %in% pos_neg_genes_S)
+  )
+
+nodes_S <- tibble(name = unique(c(edge_list_S$from, edge_list_S$to))) %>%
+  mutate(
+    type = case_when(
+      name %in% es_pairs$es_grna_target ~ "CRE",
+      TRUE                              ~ "gene"
+    )
+  )
+
+# Identify self-targeting genes in discovery_P
+self_target_genes_S <- discovery_P_S %>%
+  filter(grna_target == gene_symbol) %>%
+  pull(gene_symbol) %>%
+  unique()
+
+# Update node types
+nodes_S <- tibble(name = unique(c(edge_list_S$from, edge_list_S$to))) %>%
+  mutate(
+    type = case_when(
+      name %in% es_pairs$es_grna_target ~ "CRE",          # CREs
+      name %in% pos_neg_genes_S           ~ "pos_neg_gene", # positive controls: sig & negative
+      TRUE                              ~ "gene"          # all other genes
+    )
+  )
+
+g_S <- graph_from_data_frame(edge_list_S, directed = TRUE, vertices = nodes_S)
+
+# Edge colors: class_colors for CRE->gene, grey otherwise
+E(g_S)$color <- ifelse(!is.na(E(g_S)$edge_color), E(g_S)$edge_color, "grey60")
+
+# Edge widths: scale |log2fc|, but note edges1 now use effect_size
+E(g_S)$width <- rescale(abs(E(g_S)$log2fc), to = c(1, 6))
+
+color_map <- c(
+  CRE          = "#c03a30",
+  gene         = "#848484",
+  pos_neg_gene = "#334068"
+)
+
+
+
+
+V(g_S)$shape <- "circle"
+V(g_S)$color <- color_map[V(g_S)$type]
+V(g_S)$size  <- 2
+
+plot(
+  g_S,
+  vertex.label  = NA,
+  edge.arrow.size = 0.01,
+  layout = layout_with_fr(g_S)
+)
+
+```
+
+
+filter for only those networks that have at least 1 CRE, and for those genes that have an effect on itself (control genes), but keep non-control genes when its an end node. 
+```{r}
+## 1. Split edges into CRE→gene vs gene→gene -------------------------------
+
+# assumes you set edge_type when building the graph:
+#   "CRE_to_gene"  for CRE -> primary gene
+#   "gene_to_gene" and "dp_chain" for gene -> gene edges
+
+is_cre_edge_S <- E(g_S)$edge_type == "CRE_to_gene"
+
+cre_gene_edges_S  <- E(g_S)[is_cre_edge_S]         # keep ALL of these
+non_cre_edges_S   <- E(g_S)[!is_cre_edge_S]        # gene→gene edges (and similar)
+
+
+# 2. From gene→gene edges, keep only those where the source is green -----
+
+gene_edges_keep_S <- non_cre_edges_S[0]  # empty by default
+
+if (length(non_cre_edges_S) > 0) {
+  # ends() gives from/to vertex indices if names = FALSE
+  non_cre_ends_S <- ends(g_S, non_cre_edges_S, names = FALSE)
+  from_idx_S     <- non_cre_ends_S[, 1]
+
+  # assume green genes were tagged as type == "pos_neg_gene"
+  is_from_green_S <- V(g_S)$type[from_idx_S] == "pos_neg_gene"
+
+  gene_edges_keep_S <- non_cre_edges_S[is_from_green_S]
+}
+
+# all edges we want to keep
+edges_keep_S <- c(cre_gene_edges_S, gene_edges_keep_S)
+#edges_keep_S <- cre_gene_edges_S
+
+## 3. Build subgraph from these edges, dropping isolated nodes ------------
+
+g_edges_S <- subgraph.edges(g_S, e = edges_keep_S, delete.vertices = TRUE)
+
+
+## 4. Keep only components with at least one CRE AND at least one gene ----
+
+comp_S <- components(g_edges_S)
+
+comp_has_cre_S <- tapply(V(g_edges_S)$type == "CRE",
+                       comp_S$membership, any)
+
+comp_has_gene_S <- tapply(V(g_edges_S)$type %in% c("gene", "pos_neg_gene"),
+                        comp_S$membership, any)
+
+comps_to_keep_S <- which(comp_has_cre_S & comp_has_gene_S)
+
+verts_keep_S <- V(g_edges_S)[comp_S$membership %in% comps_to_keep_S]
+
+g_final_S <- induced_subgraph(g_edges_S, vids = verts_keep_S)
+
+## 5. Plot -----------------------------------------------------------------
+
+# Kamada-Kawai – often the most balanced
+coords <- layout_with_kk(g_final_S)
+
+# Graphopt – good for large networks
+#coords <- layout_with_graphopt(g_final_S)
+
+
+
+# DrL – scalable for big graphs, hierarchical feel
+#coords <- layout_with_drl(g_final_S)
+
+plot(
+  g_final_S,
+  layout            = coords,
+  vertex.label      = NA,
+  vertex.size       = V(g_final_S)$size,
+  vertex.color      = V(g_final_S)$color,
+  vertex.frame.color = NA,
+  edge.color        = E(g_final_S)$color,
+  edge.width        = E(g_final_S)$width,
+  edge.arrow.size   = 0.01
+)
+```
+
+keep only networks that include both CRE-gene and gene-gene connections. 
+```{r}
+## 1. Identify gene-to-gene edges (both ends are genes) on g_final ----
+
+E(g_final_S)$gene_gene <- is_gene_gene_edge(g_final_S)
+
+## 2. Filter to components that contain at least one gene→gene edge ----
+comp_S <- components(g_final_S)
+
+# map each edge to the component of its source vertex
+edge_comp_S <- comp_S$membership[ ends(g_final_S, E(g_final_S), names = FALSE)[,1] ]
+
+comp_has_gene_gene_S <- tapply(E(g_final_S)$gene_gene, edge_comp_S, any)
+
+comps_keep_S  <- as.numeric(names(comp_has_gene_gene_S)[comp_has_gene_gene_S])
+verts_keep_S  <- V(g_final_S)[ comp_S$membership %in% comps_keep_S ]
+
+# this is now your cleaned graph
+g_clean_S <- induced_subgraph(g_final_S, vids = verts_keep_S)
+
+## 3. Centrality & core genes (on g_clean!) ----
+# centrality
+V(g_clean_S)$degree      <- degree(g_clean_S, mode = "all")
+V(g_clean_S)$betweenness <- betweenness(g_clean_S, directed = TRUE, normalized = TRUE)
+V(g_clean_S)$eigen       <- evcent(g_clean_S, directed = TRUE)$vector
+
+# genes only (exclude CREs)
+gene_nodes_S <- V(g_clean_S)[V(g_clean_S)$type %in% c("gene", "pos_neg_gene")]
+
+# robust top 10% by degree: pick an explicit number of nodes
+n_genes_S   <- length(gene_nodes_S)
+n_core_S    <- max(1, ceiling(0.10 * n_genes_S))  # at least 1
+ord_deg_S   <- order(gene_nodes_S$degree, decreasing = TRUE, na.last = NA)
+core_genes_S <- gene_nodes_S[ ord_deg_S[seq_len(n_core_S)] ]
+
+## 4. Labels only for core genes ----
+V(g_clean_S)$label <- NA                     # clear all labels
+V(g_clean_S)$label[core_genes_S] <- V(g_clean_S)$name[core_genes_S]  # label only cores
+## 5. Plot ----
+coords <- layout_with_fr(g_clean_S, niter = 3000)
+
+plot(
+  g_clean_S,
+  layout               = coords,
+
+  # vertices
+  vertex.label         = V(g_clean_S)$label,
+  vertex.label.cex     = 0.7,
+  vertex.label.color   = "black",
+  vertex.label.family  = "Arial",
+  vertex.label.degree  = -pi / 2,   # label below node
+  vertex.label.dist    = 0.5,
+
+  vertex.size          = V(g_clean_S)$size,
+  vertex.color         = V(g_clean_S)$color,
+  vertex.frame.color   = NA,
+
+  # edges
+  edge.color           = E(g_clean_S)$color,
+  edge.width           = E(g_clean_S)$width,
+  edge.arrow.size      = 0.05
+)
+```
+
