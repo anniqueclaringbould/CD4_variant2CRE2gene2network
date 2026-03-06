@@ -1,0 +1,149 @@
+---
+title: "Enhancer screen, order guides"
+author: "Annique Claringbould"
+format: html
+embed-resources: true
+toc: true
+code-fold: true
+code-summary: "Code"
+editor: visual
+---
+
+## Aim
+
+In this report, I describe how we design the enhancer guides that we will order for the full T-cell enhancer screen as part of OTAR2063.
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(GenomicRanges)
+library(plyranges)
+library(DT)
+library(qs)
+library(biomaRt)
+library(readxl)
+```
+
+## Read data
+
+```{r}
+#INPUT OPTIONS
+dir <- "/g/steinmetz/project/otar/"
+
+#libraries
+panels <- qread(paste0(dir, "select_genes_full_screen/Library_panels_2023-12-11.qs"))
+
+#guides
+guides <- fread(paste0(dir, "select_enhancer_peaks/guide_design/20231205_final_guides/complete_top_guides.bed"))
+ctrl_guides <- fread(paste0(dir, "select_enhancer_peaks/guide_design/20231205_final_guides/control_promoter_guides.tsv"))
+nt_ctrl_guides <- fread(paste0(dir, "select_enhancer_peaks/guide_design/nt_gRNAs_Dolcetto_SetA.csv"))
+p_ctrl_guides <- read_excel(paste0(dir, "select_enhancer_peaks/guide_design/positive_control_gRNAs.xlsx"))
+
+#dplyr commands
+select <- dplyr::select
+```
+
+## Link enhancer panels to the designed guides
+
+Add controls to each panel, add the flanking regions for the guide sequences and write the files separately for each panel.
+
+```{r}
+#guide flanking regions
+design_type <- "steinmetz" #"vivlion" "steinmetz"
+
+if(design_type == "vivlion"){
+  leader <- "TGGAAAGGACGAAACACCG"
+  trailer <- "GTTTAAGAGCTATGCTGG"
+} else if(design_type == "steinmetz"){
+  leader <- "GAAGTGCCATTCCGCCTGACCTCGTCTCACACCG"
+  trailer <- "GTTTCGAGACGAGGCTAGGTGGAGGCTCAGTG"
+}
+
+#get ENSEMBL IDs for control genes
+mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+gene_symbols <- unique(ctrl_guides$`Control gene`)
+ensembl_ids <- getBM(attributes = c("external_gene_name", "ensembl_gene_id"), filters = "external_gene_name", values = gene_symbols, mart = mart)
+
+#save column name to get around some dplyr issues
+sgRNA_col_name <- "sgRNA Sequence"  
+
+#format control guides to be added to each panel
+ctrl_guides_fmt <- ctrl_guides %>%
+  left_join(ensembl_ids, by = c("Control gene" = "external_gene_name")) %>%
+  group_by(`Control gene`) %>%
+  mutate(peak = paste0(`Control gene`, "_Promoter"),
+         chr = NA, guide_start = NA, guide_end = NA, 
+         guide_sequence = paste0(leader, !!sym(sgRNA_col_name), trailer),
+         guide_strand = NA, score = NA,
+         source = paste0("Sanson_set", `Sanson guide set`), PAM = NA, target_gene = ensembl_gene_id,
+         guide_id = paste0(`Control gene`, "_Promoter_", row_number())) %>%
+  ungroup() %>%
+  select(peak, chr, guide_start, guide_end, guide_sequence, 
+         guide_strand, score, source, PAM, target_gene, guide_id)
+
+#format non-targeting control guides to be added to each panel
+nt_ctrl_guides_fmt <- nt_ctrl_guides %>%
+  mutate(peak = "Non-targeting",
+         chr = NA, guide_start = NA, guide_end = NA, 
+         guide_sequence = paste0(leader, Barcode, trailer),
+         guide_strand = NA, score = NA,
+         source = "Dolcetto_SetA", PAM = NA, target_gene = "Non-targeting",
+         guide_id = paste0("Non-targeting_", row_number())) %>%
+  ungroup() %>%
+  select(peak, chr, guide_start, guide_end, guide_sequence, 
+         guide_strand, score, source, PAM, target_gene, guide_id)
+
+#format positive control guides to be added to panel 1 only
+p_ctrl_guides_fmt <- p_ctrl_guides %>%
+  separate(target, into = c("chr", "start", "end"), remove = F) %>%
+  mutate(peak = target,
+         guide_start = NA, guide_end = NA,
+         guide_sequence = paste0(leader, sequence, trailer),
+         guide_strand = NA, score = NA,
+         source = case_when(str_detect(`...1`, "Nila") ~ "Nila_experiment",
+                            str_detect(`...1`, "GSK") ~ "GSK_positive_control",
+                            str_detect(`...1`, "pilot") ~ "Pilot_positive_control"),
+         PAM = NA, target_gene = `target gene`, 
+         guide_id = paste0(source, "_", `gRNA number`)) %>%
+  select(peak, chr, guide_start, guide_end, guide_sequence, 
+         guide_strand, score, source, PAM, target_gene, guide_id)
+
+#remove empty panel 17
+panels[[17]] <- NULL
+ 
+#combine panels with guides
+info <- list()
+for (i in seq_along(panels)) {
+  info[[i]] <- panels[[i]] %>%
+    inner_join(guides, by = c("peak" = "target"), multiple = "all") %>%
+    group_by(peak) %>%
+    mutate(gene_id = paste(unique(gene_id), collapse = ";"),
+           guide_sequence = paste0(leader, guide_sequence, trailer)) %>%
+    select(peak, chr, guide_start, guide_end, guide_sequence, guide_strand, score, source, PAM,
+           target_gene = gene_id) %>%
+    distinct() %>%
+    mutate(guide_id = paste0(peak, "_", row_number())) %>%
+    ungroup()
+  info[[i]] <- rbind(info[[i]], ctrl_guides_fmt)
+  info[[i]] <- rbind(info[[i]], nt_ctrl_guides_fmt)
+}
+
+#add positive controls to panel 1
+info[[1]] <- rbind(info[[1]], p_ctrl_guides_fmt)
+  
+#make the list minimal, for ordering
+to_order <- list()
+for (i in seq_along(info)) {
+  to_order[[i]] <- info[[i]] %>%
+    select(guide_id, guide_sequence) %>%
+    distinct()
+}
+
+#write 
+for (i in seq_along(panels)) { 
+  fwrite(info[[i]], paste0(dir, "select_enhancer_peaks/guide_design/output/gRNA_info_", design_type, "_panel_", i, 
+                             "_", Sys.Date(), ".csv"), row.names = FALSE, sep = ",")
+    fwrite(to_order[[i]], paste0(dir, "select_enhancer_peaks/guide_design/output/gRNA_for_ordering_", design_type, "_panel_", i, 
+                             "_", Sys.Date(), ".csv"), row.names = FALSE, sep = ",")
+}
+```

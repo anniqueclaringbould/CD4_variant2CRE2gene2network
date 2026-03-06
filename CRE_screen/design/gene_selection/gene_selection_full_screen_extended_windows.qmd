@@ -1,0 +1,659 @@
+---
+title: "Gene selection full T cell screen OTAR2063"
+author: "Annique Claringbould"
+format: html
+embed-resources: true
+toc: true
+code-fold: true
+code-summary: "Code"
+editor: visual
+---
+
+## Aim
+
+In this report, I describe how we select the genes that we will include in the full T-cell enhancer screen as part of OTAR2063. The goal is to identify genes that are near our selected enhancer regions that are active in (naive) T-cells, as well as genes connected to the enhancers through a GRN and other relevant genes. T-cells play an important role in autoimmune diseases, so we want to specifically target the enhancer regions whose function may be affected in individuals with specific disease-associated variants, and read out the expression levels of relevant T cell genes.
+
+```{r, message=F}
+library(tidyverse)
+library(data.table)
+library(patchwork)
+library(GenomicRanges)
+library(plyranges)
+library(DT)
+library(gintools)
+library(UpSetR)
+```
+
+## Read data
+
+Here, I will read a couple of files that we will use in this script to prioritize genes for the screen:
+
+-   enhancer regions selected in `/g/steinmetz/project/otar/reports/enhancer_selection_full_screen_ATAC_extended_windows.qmd`
+
+-   gene expression in T cells, based on the script `/g/scb/zaugg/claringb/Tcell_big_screen/scripts/T_cell_gene_expression.qmd` using the gene expression from pilot 1 (`/g/steinmetz/project/otar/results/tapseq_experiments/pilot1/pilot1_tenx/dge.txt`)
+
+    -   this file also includes information about gene name and location
+
+-   GRN based on [Freimer et al., Nature Genetics 2022](https://www.nature.com/articles/s41588-022-01106-y) data in CD4+ T cells
+
+-   GRN based on paired RNA-seq and H3K27ac ChIP-seq from 138 healthy donors from the [BLUEPRINT consortium](https://www.blueprint-epigenome.eu/) (EGAD00001002671, EGAD00001002673)
+
+-   eQTLs from CD4+ naive T cells, unstimulated and 16h, 40h and 5d after stimulation with anti-CD3/CD28 beads, from [Soskic et al., Nature Genetics 2022](https://www.nature.com/articles/s41588-022-01066-3)
+
+-   Enhancer to Gene predictions from ENCODE based on two biosamples with a good match to our T cells
+
+-   prioritised list from OTAR2063 aim 1, also in T cells
+
+```{r}
+#INPUT OPTIONS
+dir <- "/g/steinmetz/project/otar/"
+#enhancer_file <- paste0(dir, "select_enhancer_peaks/Final_peaks_large_screen_2023-12-05.tsv")
+enhancer_file <- paste0(dir, "select_enhancer_peaks/Final_peaks_large_screen_2024-03-01.tsv")
+t_cell_exp_file <- "/g/scb/zaugg/claringb/Tcell_big_screen/output/gene_list_unfiltered.txt"
+grn_file <- "/g/scb/zaugg/servaas/Projects/Tcell_Project/results/All_MinusOne_250kb_newGRaNIE/GRaNIE_SummitsFalse_OL3_Minus_250kb_ALL_TFpeak03/250kb_GRN.rds"
+grn2_file <- "/g/scb/zaugg/zaugg_shared/data/GRN/data/CD4+/Naive/outputNew/GRN.rds"
+eqtl_files <- list.files(paste0(dir, "data/trynka_lab/eQTLs"), pattern = "tensor", full.names = T)
+#e2g_files <- list.files(paste0(dir, "data/encode"), pattern = "encode_e2g_predictions", full.names = T)
+e2g_files <- list.files(paste0(dir, "data/encode"), pattern = ".bed.gz", full.names = T)
+aim1_file <- paste0(dir, "data/trynka_lab/OTAR2063_aim1/otar2063_cocult_gene_prio_pilotv2_2022-05-27.cleaned.xlsx")
+
+#READ DATA
+enh <- fread(enhancer_file) #enhancer list
+exp <- fread(t_cell_exp_file) #gene expression
+grn <- readRDS(grn_file)
+grn2 <- readRDS(grn2_file)
+
+fread_eqtl <- function(file){
+  dm <- fread(file) #eqtl files from CD4+ naive T cells
+  name <- gsub(pattern = "_500kb_combined.tsv.gz", replacement = "", basename(file))
+  dm <- dm %>%
+    filter(pval_perm < 0.05) %>% #keep only significant effects
+    mutate(dataset = name)
+}
+
+eqtl <- do.call(rbind, lapply(eqtl_files, fread_eqtl)) #eQTLs
+
+e2g <- do.call(rbind, lapply(e2g_files, fread))
+
+aim1 <- readxl::read_excel(aim1_file, sheet = 2)
+```
+
+## Select genes with base-level expression in T cells to start
+
+Number of unique genes in the list:
+
+```{r}
+length(unique(exp$Gene))
+```
+
+I want to keep only genes that are minimally expressed in T cells. The T cell expression file contains raw and SCTransformed gene expression levels, and `NA` for the latter if a gene could not be detected in at least 5 cells. After filtering for only \>5 cells, we are left with this number of unique genes:
+
+```{r, warning = F, message = F}
+exp <- exp %>%
+  filter(!is.na(sct))
+
+length(unique(exp$Gene))
+exp %>% group_by(`Gene type`) %>% tally() %>% arrange(-n)
+```
+
+I will keep only protein coding genes and lincRNAs, so we are left with this number of unique genes:
+
+```{r, warning = F, message = F}
+exp <- exp %>%
+  filter(str_detect(`Gene type`, "protein_coding") | str_detect(`Gene type`, "lincRNA") | str_detect(`Gene type`, "bidirectional_promoter_lncRNA"))
+
+length(unique(exp$Gene))
+```
+
+We may get back to this later, but I will stick with this list as input for now.
+
+## Select nearest gene(s)
+
+Number of individual peaks and SNPs in enhancer list:
+
+```{r}
+length(unique(enh$peak)) #some peaks are duplicated if they contain multiple SNPs
+length(unique(enh$snp)) #some SNPs are duplicated when they are implicated in multiple diseases
+```
+
+### Select all genes within a window of enhancer
+
+See how many genes we include if we simply take all genes within a window around each enhancer. Tested here first with 250kb and 100kb.
+
+```{r}
+#Make GRanges object from enhancers
+gr.enh <- enh %>%
+  makeGRangesFromDataFrame(., seqnames.field="chr", start.field="start", end.field="end", keep.extra.columns=T)
+
+#Make GRanges object from expressed genes
+gr.exp <- exp %>%
+  na.omit() %>% #remove genes with NA for position --> mitochondrial genes and CROPseq vectors
+  makeGRangesFromDataFrame(., seqnames.field="Chromosome/scaffold name", start.field="Gene start (bp)", end.field="Gene end (bp)", keep.extra.columns=T)
+
+#change chr. names to match the same style
+seqlevelsStyle(gr.exp) <- "UCSC"
+
+#Intersect regions around enhancers with all genes in the list of expressed genes
+gr.enh_exp_100k <- join_overlap_inner(gr.enh, gr.exp, maxgap = 100000) #keep all genes that fall within the extended enhancer regions
+```
+
+Number of genes within 100k of an enhancer:
+
+```{r}
+length(unique(gr.enh_exp_100k$`Gene stable ID`))
+```
+
+Number of enhancers with at least 1 gene within 100k of an enhancer:
+
+```{r}
+print(paste0(length(unique(gr.enh_exp_100k$peak)), " enhancers have at least 1 gene within 100kb (", round(length(unique(gr.enh_exp_100k$peak))/length(unique(gr.enh$peak))*100, 1),"%)"))
+```
+
+Average number of genes per enhancer:
+
+```{r}
+gr.enh_exp_100k %>%
+  as.data.frame() %>%
+  group_by(peak) %>%
+  dplyr::select(peak, Gene.stable.ID) %>%
+  distinct() %>%
+  tally() %>% 
+  summarize(min = min(n), max = max(n), median = median(n), mean = mean(n))
+```
+
+### Select nearest gene (left and right) from the peak coordinates
+
+See how many genes would be included if we select the nearest upstream and downstream gene for each enhancer. Number of genes included if we take the ones up- and downstream, or overlapping any of the enhancers:
+
+```{r}
+#nearest upstream gene
+#gr.enh_up <- join_nearest_left(gr.enh, gr.exp) #only gives ~300 genes
+gr.enh_up <- join_follow_left(gr.enh, gr.exp)
+
+#nearest downstream gene
+#gr.enh_down <- join_nearest_right(gr.enh, gr.exp) #only gives ~300 genes
+gr.enh_down <- join_precede_right(gr.enh, gr.exp)
+
+#overlapping gene(s)
+gr.enh_overlap <- join_overlap_inner(gr.enh, gr.exp)
+
+#combine all together
+gr.enh_closest <- bind_ranges(gr.enh_up, gr.enh_down, gr.enh_overlap) #contains a bunch of duplicates
+
+#length 
+length(unique(gr.enh_closest$`Gene stable ID`))
+```
+
+And how many genes overlap between those within the 100kb window and the closest up- and downstream genes?
+
+```{r}
+length(intersect(unique(gr.enh_closest$`Gene stable ID`), unique(gr.enh_exp_100k$`Gene stable ID`)))
+#setdiff(unique(gr.enh_closest$`Gene stable ID`), unique(gr.enh_exp_100k$`Gene stable ID`))
+```
+
+Differences come from:
+
+-   sometimes the closest gene up- and/or downstream falls outside of the window
+
+-   sometimes genes within window are not the closest gene to each enhancer
+
+How many genes do we keep if we include all within the 100kb window and the closest up- and downstream genes?
+
+```{r}
+gr.enh_closest_100k <- bind_ranges(gr.enh_closest, gr.enh_exp_100k)
+length(unique(gr.enh_closest_100k$`Gene stable ID`))
+```
+
+## Select GRN genes from TF KO GRN
+
+Let's now look at the genes we might want to add from the GRN made from [Freimer et al., Nature Genetics 2022](https://www.nature.com/articles/s41588-022-01106-y) data. Nila made this GRN, info here:
+
+```         
+/g/scb/zaugg/servaas/Projects/Tcell_Project/results/All_MinusOne_250kb_newGRaNIE/GRaNIE_SummitsFalse_OL3_Minus_250kb_ALL_TFpeak03/
+```
+
+~~We want to include links with a good correlation, so I will filter on peak-gene links with an adjusted p-value \< 0.1. The GRN is already filtered for TF-peak links with FDR \< 0.2.~~ **Update**: We want to include as many links as possible, so I will filter on peak-gene links with an adjusted p-value \< 0.3.
+
+I will also include only genes that are in our list of expressed genes.
+
+Number of genes are there in the GRN if we perform this basic filtering:
+
+```{r}
+#filtered GRN
+#df.grn <- grn@connections$all.filtered$`0` %>%
+#  filter(peak_gene.p_adj < 0.1) %>%
+#  filter(gene.ENSEMBL %in% gr.exp$`Gene stable ID`)
+
+#more loosely filtered peak-gene connections
+df.grn <- grn@connections$peak_genes$`0` %>%
+  mutate(peak_gene.p_adj = p.adjust(peak_gene.p_raw, method = "BH")) %>%
+  filter(peak_gene.p_adj < 0.3) %>%
+  filter(gene.ENSEMBL %in% gr.exp$`Gene stable ID`)
+
+length(unique(df.grn$gene.ENSEMBL))
+```
+
+Now I want to overlap the peak regions in the GRN with our enhancer list, to see if there are any additional genes connected to these enhancers that we have not included based on other inclusion criteria. I allow for a maximum 1kb gap between our enhancer list and the enhancers for the GRN to account for varying definitions of the enhancer sites.
+
+Number of unique enhancers that overlap with GRN:
+
+```{r}
+#make GRN into GRanges object
+gr.grn <- df.grn %>%
+  separate(peak.ID, remove = F, into = c("chr", "start", "end")) %>%
+  makeGRangesFromDataFrame(., seqnames.field="chr", start.field="start", end.field="end", keep.extra.columns=T)
+
+#overlap with enhancers
+gr.enh_grn <- join_overlap_inner(gr.enh, gr.grn, maxgap = 1000) #keep all GRN regions genes that fall within the enhancer regions
+
+#number of enhancers
+length(unique(gr.enh_grn$peak))
+```
+
+Number of unique genes that overlap with these enhancers:
+
+```{r}
+(l_grn <- length(unique(gr.enh_grn$gene.ENSEMBL)))
+```
+
+Do they overlap with the list of 100kb and/or closest genes?
+
+```{r}
+l_100 <- length(intersect(unique(gr.enh_grn$gene.ENSEMBL), unique(gr.enh_exp_100k$`Gene stable ID`)))
+l_cl <- length(intersect(unique(gr.enh_grn$gene.ENSEMBL), unique(gr.enh_closest$`Gene stable ID`)))
+#length(intersect(unique(gr.enh_grn$gene.ENSEMBL), unique(gr.enh_closest_100k$`Gene stable ID`)))
+
+print(paste0(l_100, " (", round(l_100/l_grn*100, 1), "%)"))
+print(paste0(l_cl, " (", round(l_cl/l_grn*100, 1), "%)"))
+```
+
+Indeed, most of the GRN genes are already included as they are near to the enhancers.
+
+## Select GRN genes from RNA-seq/H3K27ac GRN
+
+Let's now look at the genes we might want to add from the GRN made from BLUEPRINT data. Neha made this GRN, info here:
+
+```         
+/g/scb/zaugg/zaugg_shared/data/GRN/data/CD4+/Naive/outputNew/
+```
+
+We want to include as many links as possible, so I will filter on peak-gene links with an adjusted p-value \< 0.3. I will also filter the peak-gene distance to be \<250kb, to be comparable with Nila's network.
+
+I will also include only genes that are in our list of expressed genes.
+
+Number of genes are there in the GRN if we perform this basic filtering:
+
+```{r}
+#more loosely filtered peak-gene connections
+df.grn2 <- grn2@connections$peak_genes$`0` %>%
+  filter(peak_gene.distance <= 250000) %>%
+  mutate(peak_gene.p_adj = p.adjust(peak_gene.p_raw, method = "BH")) %>%
+  filter(peak_gene.p_adj < 0.3) %>%
+  filter(gene.ENSEMBL %in% gr.exp$`Gene stable ID`)
+
+length(unique(df.grn2$gene.ENSEMBL))
+```
+
+Now I want to overlap the peak regions in the GRN with our enhancer list, to see if there are any additional genes connected to these enhancers that we have not included based on other inclusion criteria. I allow for a maximum 1kb gap between our enhancer list and the enhancers for the GRN to account for varying definitions of the enhancer sites.
+
+Number of unique enhancers that overlap with GRN:
+
+```{r}
+#make GRN into GRanges object
+gr.grn2 <- df.grn2 %>%
+  separate(peak.ID, remove = F, into = c("chr", "start", "end")) %>%
+  makeGRangesFromDataFrame(., seqnames.field="chr", start.field="start", end.field="end", keep.extra.columns=T)
+
+#overlap with enhancers
+gr.enh_grn2 <- join_overlap_inner(gr.enh, gr.grn2, maxgap = 1000) #keep all GRN regions genes that fall within the enhancer regions
+
+#number of enhancers
+length(unique(gr.enh_grn2$peak))
+```
+
+Number of unique genes that overlap with these enhancers:
+
+```{r}
+(l_grn2 <- length(unique(gr.enh_grn2$gene.ENSEMBL)))
+```
+
+Do they overlap with the list of 100kb or closest genes?
+
+```{r}
+l_100 <- length(intersect(unique(gr.enh_grn2$gene.ENSEMBL), unique(gr.enh_exp_100k$`Gene stable ID`)))
+l_cl <- length(intersect(unique(gr.enh_grn2$gene.ENSEMBL), unique(gr.enh_closest$`Gene stable ID`)))
+#length(intersect(unique(gr.enh_grn2$gene.ENSEMBL), unique(gr.enh_closest_100k$`Gene stable ID`)))
+
+print(paste0(l_100, " (", round(l_100/l_grn2*100, 1), "%)"))
+print(paste0(l_cl, " (", round(l_cl/l_grn2*100, 1), "%)"))
+```
+
+Interestingly, quite a few of these GRN genes are not already included in the closest gene lists.
+
+## Select eQTL genes
+
+We want to include links with a significant eQTL effect in naive CD4 T cells in either unstimulated or stimulated with CD3/CD28 condition (16h, 40h, 5d). I will filter on eQTLs with an adjusted p-value \< 0.05. I will also include only genes that are in our list of expressed genes.
+
+Number of genes are there in the eQTL lists if we perform this basic filtering:
+
+```{r}
+eqtl <- eqtl %>%
+  filter(phenotype_id %in% gr.exp$`Gene stable ID`)
+
+length(unique(eqtl$phenotype_id))
+```
+
+Let's overlap with our enhancers. Number of unique enhancers that overlap with eQTL SNP:
+
+```{r}
+#make eQTL results into GRanges object
+gr.eqtl <- eqtl %>%
+  separate(variant_id, remove = F, into = c("chr", "pos", "a1", "a2")) %>%
+  makeGRangesFromDataFrame(., seqnames.field="chr", start.field="pos", end.field="pos", keep.extra.columns=T)
+
+seqlevelsStyle(gr.eqtl) <- "UCSC"
+
+#overlap with enhancers
+gr.enh_eqtl <- join_overlap_inner(gr.enh, gr.eqtl, maxgap = 1000) #keep all GRN regions genes that fall within the enhancer regions
+
+#number of enhancers
+length(unique(gr.enh_eqtl$peak))
+```
+
+Number of unique genes where eQTL SNP overlaps enhancer:
+
+```{r}
+(l_eqtl <- length(unique(gr.enh_eqtl$phenotype_id)))
+```
+
+Do they overlap with the list of 100kb or closest genes?
+
+```{r}
+l_100 <- length(intersect(unique(gr.enh_eqtl$phenotype_id), unique(gr.enh_exp_100k$`Gene stable ID`)))
+l_cl <- length(intersect(unique(gr.enh_eqtl$phenotype_id), unique(gr.enh_closest$`Gene stable ID`)))
+#length(intersect(unique(gr.enh_eqtl$phenotype_id), unique(gr.enh_closest_100k$`Gene stable ID`)))
+
+print(paste0(l_100, " (", round(l_100/l_eqtl*100, 1), "%)"))
+print(paste0(l_cl, " (", round(l_cl/l_eqtl*100, 1), "%)"))
+```
+
+## Include enhancer-to-gene connections from ENCODE
+
+We used ten/twelve ENCODE biosamples that are very similar in their activation state to the T-cells in our protocol:
+
+-   activated_CD4_positive_naive_alpha-beta_T_cell_ENCDO662KZD_ENCFF057ECO
+
+-   activated_CD4-positive_alpha-beta_T_cell_ENCDO923WRX_ENCFF968IHM
+
+-   activated_T-cell_ENCDO282XZV_ENCFF736DEU
+
+-   activated_T-cell_ENCFF037RIQ
+
+-   activated_T-cell_ENCFF272CLG
+
+-   activated_T-cell_ENCFF301BIC
+
+-   activated_T-cell_ENCFF318YBS
+
+-   activated_T-cell_ENCFF349RNU
+
+-   activated_T-cell_ENCFF361ZOQ
+
+-   activated_T-cell_ENCFF620SNJ
+
+-   activated_T-cell_ENCFF777SBP
+
+-   stimulated_activated_naive_CD4-positive_alpha-beta_T_cell_ENCDO791UJG_ENCFF410YVW
+
+I've downloaded the significant E2G predictions for these samples from the ENCODE portal. Here, I will overlap the enhancers with our list and keep the resulting list of genes.
+
+```{r}
+e2g <- e2g %>%
+  filter(TargetGeneEnsemblID %in% gr.exp$`Gene stable ID`) %>%
+  left_join(exp, by = c("TargetGene" = "Gene"))
+  
+length(unique(e2g$TargetGene))
+```
+
+Number of enhancers that overlap:
+
+```{r}
+#make E2G results into GRanges object
+gr.e2g <- e2g %>%
+  makeGRangesFromDataFrame(., seqnames.field="#chr", start.field="start", end.field="end", keep.extra.columns=T)
+
+#overlap with enhancers
+gr.enh_e2g <- join_overlap_inner(gr.enh, gr.e2g, maxgap = 0) #keep all E2G regions genes that fall within the enhancer regions
+
+#number of enhancers
+length(unique(gr.enh_e2g$peak))
+```
+
+We then check how many of these genes overlap the 100kb and closest gene lists:
+
+```{r}
+l_e2g <- length(unique(gr.enh_e2g$`Gene stable ID`))
+
+l_100 <- length(intersect(unique(gr.enh_e2g$`Gene stable ID`), unique(gr.enh_exp_100k$`Gene stable ID`)))
+l_cl <- length(intersect(unique(gr.enh_e2g$`Gene stable ID`), unique(gr.enh_closest$`Gene stable ID`)))
+#length(intersect(unique(gr.enh_e2g$`Gene stable ID`), unique(gr.enh_closest_100k$`Gene stable ID`)))
+
+print(paste0(l_100, " (", round(l_100/l_e2g*100, 1), "%)"))
+print(paste0(l_cl, " (", round(l_cl/l_e2g*100, 1), "%)"))
+```
+
+## Include genes from aim 1
+
+First take only the prioritised genes (those with \`expr_rank_ntreg_itreg_mean\` \< 83, coloured in red but that info is not saved in R). Number of genes that are also expressed in T cells:
+
+```{r}
+aim1 <- aim1 %>%
+  filter(expr_rank_ntreg_itreg_mean < 83) %>%
+  filter(gene_id %in% gr.exp$`Gene stable ID`)
+
+(l_aim <- length(unique(aim1$gene_id)))
+```
+
+How many overlap with our 100kb & closest gene list?
+
+```{r}
+l_100 <- length(intersect(aim1$gene_id, unique(gr.enh_exp_100k$`Gene stable ID`)))
+l_cl <- length(intersect(aim1$gene_id, unique(gr.enh_closest$`Gene stable ID`)))
+
+print(paste0(l_100, " (", round(l_100/l_aim*100, 1), "%)"))
+```
+
+## Combine gene lists to get a total number
+
+Combining the list of
+
+-   closest up- and downstream gene
+
+-   all genes within 100kb
+
+-   all genes connected via Nila's GRN
+
+-   all genes connected via Neha's GRN
+
+-   all genes connected via eQTLs
+
+-   E2G predictions
+
+-   OTAR2063 aim1 genes
+
+-   genes that were added as enhancer targets, where the peak did not overlap a GWAS SNP
+
+Results in this **TOTAL number of genes**:
+
+```{r}
+enh_up <- gr.enh_up %>%
+  as.data.frame() %>%
+  mutate(source = "upstream") %>%
+  select(peak, peak_type = type, SNP = snp, chr = seqnames, SNP_pos = pos, SNP_trait = trait,
+         gene_id = Gene.stable.ID, source)
+
+enh_down <- gr.enh_down %>%
+  as.data.frame() %>%
+  mutate(source = "downstream") %>%
+  select(peak, peak_type = type, SNP = snp, chr = seqnames, SNP_pos = pos, SNP_trait = trait,
+         gene_id = Gene.stable.ID, source)
+
+enh_overlap <- gr.enh_overlap %>%
+  as.data.frame() %>%
+  mutate(source = "overlap") %>%
+  select(peak, peak_type = type, SNP = snp, chr = seqnames, SNP_pos = pos, SNP_trait = trait,
+         gene_id = Gene.stable.ID, source)
+
+enh_100k <- gr.enh_exp_100k %>%
+  as.data.frame() %>%
+  mutate(source = "100kb window") %>%
+  select(peak, peak_type = type, SNP = snp, chr = seqnames, SNP_pos = pos, SNP_trait = trait,
+         gene_id = Gene.stable.ID, source)
+
+enh_grn <- gr.enh_grn %>%
+  as.data.frame() %>%
+  mutate(source = "GRN_Nila") %>%
+  select(peak, peak_type = type, SNP = snp, chr = seqnames, SNP_pos = pos, SNP_trait = trait,
+         gene_id = gene.ENSEMBL, source)
+
+enh_grn2 <- gr.enh_grn2 %>%
+  as.data.frame() %>%
+  mutate(source = "GRN_Neha") %>%
+  select(peak, peak_type = type, SNP = snp, chr = seqnames, SNP_pos = pos, SNP_trait = trait,
+         gene_id = gene.ENSEMBL, source)
+
+enh_eqtl <- gr.enh_eqtl %>%
+  as.data.frame() %>%
+  mutate(source = "eQTL") %>%
+  select(peak, peak_type = type, SNP = snp, chr = seqnames, SNP_pos = pos, SNP_trait = trait,
+         gene_id = phenotype_id, source)
+
+enh_e2g <- gr.enh_e2g %>%
+  as.data.frame() %>%
+  mutate(source = "E2G") %>%
+  select(peak, peak_type = type, SNP = snp, chr = seqnames, SNP_pos = pos,
+         SNP_trait = trait, gene_id = TargetGeneEnsemblID, source)
+
+aim1_no_enh <- aim1 %>%
+  mutate(source = "aim1",
+         peak = NA, peak_type = NA, SNP = NA, chr = NA, SNP_pos = NA, SNP_trait = NA) %>%
+  select(peak, peak_type, SNP, chr, SNP_pos, SNP_trait,
+         gene_id, source)
+
+#make a subset of expression data with only gene names and ENSG IDs
+#use this to ensure all entries have an ENSG ID before merging to get the other info
+conv <- exp %>%
+  select(Gene, `Gene stable ID`) %>%
+  distinct()
+
+#list of enhancers that were added as controls with specified gene links, such as the GSK controls, Nila's experiment's controls, and eQTLs and GRN links that do not overlap a GWAS variant
+enh_nonGWAS <- gr.enh %>%
+  as.data.frame() %>%
+  filter(gene != "") %>% #select the enhancers that come from non GWAS overlap
+  separate_longer_delim(gene, ";") %>% #split rows where one enhancer is supposed to target multiple genes from Nila's experiment
+  mutate(gene_name = case_when(str_detect(gene, "ENSG") ~ NA, #if the gene ID is not an ENSG number, save as gene_name, otherwise save as gene_id
+                          !str_detect(gene, "ENSG") ~ gene),
+         gene_id = case_when(str_detect(gene, "ENSG") ~ gene,
+                             !str_detect(gene, "ENSG") ~ NA)) %>%
+  filter(is.na(gene_id) | gene_id %in% gr.exp$`Gene stable ID`) %>% #filter to keep genes that are expressed in T cells
+  left_join(conv, by = c("gene_name" = "Gene")) %>% #ensure each row has ENSG ID
+  mutate(gene_id = case_when(is.na(gene_id) ~ `Gene stable ID`,
+                             !is.na(gene_id) ~ gene_id)) %>%
+  mutate(source = paste0("nonGWAS_", trait),
+         SNP = NA, chr = NA, SNP_pos = NA, SNP_trait = NA) %>%
+  select(peak, peak_type = type, SNP, chr, SNP_pos, SNP_trait,
+         gene_id, source)
+
+#combine all together
+enh_all <- rbind(enh_up, enh_down, enh_overlap, enh_100k, enh_grn, enh_grn2, enh_eqtl, enh_e2g, aim1_no_enh, enh_nonGWAS)
+
+#add gene position & name
+enh_all <- enh_all %>%
+  left_join(exp, by = c("gene_id" = "Gene stable ID")) %>% #add gene info per row 
+  select(peak, peak_type, SNP, chr = `Chromosome/scaffold name`, SNP_pos, SNP_trait,
+         gene_name = Gene, gene_id, gene_start = `Gene start (bp)`, gene_end = `Gene end (bp)`, source) %>%
+  distinct() %>%
+  arrange(peak, gene_id, SNP)
+
+#number of unique genes
+unique_genes <- enh_all %>%
+  select(gene_id, gene_name, chr, gene_start, gene_end) %>%
+  distinct()
+
+nrow(unique_genes)
+```
+
+<br>
+
+**NB** there were 31 genes (18 unique) that were included as strong eQTLs, but their genes do not overlap with our list of expressed genes, because
+
+-   2 genes were not in our data at all
+
+-   8 genes were not expressed in at least 5 cells
+
+-   8 genes were not protein coding or lncRNA genes
+
+These have been removed.
+
+### Gene distributions across source and chromosomes
+
+These are the sources of the genes:
+
+```{r}
+enh_all %>% 
+  group_by(source) %>% 
+  summarize(n = n_distinct(gene_id))
+```
+
+**NB:** we have 1000+ up- and downstream genes in total (one up- and downstream for each peak), however, sometimes the same gene can be the upstream gene for two peaks, so we end up with fewer **unique** up- and downstream genes.
+
+Upset plot with all of these sources to understand overlap:
+
+```{r}
+# Parse data frame to make upset plot
+upset_data <- enh_all %>%
+  group_by(gene_id) %>%
+  summarize(categories = paste(unique(source), collapse = "&")) %>%
+  group_by(categories) %>%
+  summarize(n = n_distinct(gene_id)) %>%
+  deframe()
+
+#Plot
+p <- upset(fromExpression(upset_data), 
+      nsets = 15, 
+      order.by = "freq", 
+      decreasing = T, 
+      mb.ratio = c(0.4, 0.6),
+      show.numbers = F,
+      text.scale = 1.2, 
+      point.size = 2, 
+      sets.bar.color = "#56B4E9", 
+      keep.order = TRUE, 
+      sets.x.label = "categories",
+      main.bar.color = "#D55E00",
+      matrix.color = "#009E73",
+      )
+pdf(paste0(dir, "select_genes_full_screen/Upset_plot_gene_sources.pdf"), height = 5, width = 9)
+print(p)
+dev.off()
+```
+
+These are the chromosome distributions of the genes:
+
+```{r}
+enh_all %>% select(gene_id, chr) %>% distinct() %>% group_by(chr) %>% tally() %>% print(n = 25)
+```
+
+## Save the data
+
+```{r}
+fwrite(enh_all, paste0(dir, "select_genes_full_screen/prioritised_gene_list_100kb_up_downstream_eQTL_GRN_aim1_E2G_nonGWAS_extended_windows_", Sys.Date(), ".tsv"), sep = "\t")
+
+fwrite(unique_genes, paste0(dir, "select_genes_full_screen/prioritised_gene_list_100kb_up_downstream_eQTL_GRN_aim1_E2G_nonGWAS_extended_windows_unique_genes_", Sys.Date(), ".tsv"), sep = "\t")
+```
+
+## Session Info
+
+```{r}
+sessionInfo()
+```

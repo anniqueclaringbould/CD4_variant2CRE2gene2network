@@ -1,0 +1,1007 @@
+---
+title: "Enhancer selection full T cell screen"
+author: "Annique Claringbould"
+format: html
+embed-resources: true
+toc: true
+code-fold: true
+code-summary: "Show the code"
+editor: visual
+---
+
+# Aim
+
+In this report, I describe how we select the enhancer regions that we will include in the full T-cell enhancer screen as part of OTAR2063. The goal is to identify enhancer regions that are active in (naive) T-cells and that also overlap a GWAS variant for an autoimmune disease. T-cells play an important role in autoimmune diseases, so we want to specifically target the enhancer regions whose function may be affected in individuals with specific disease-associated variants.
+
+In a second part, we also include enhancers that are active in T-cells, but that do not (yet) overlap a GWAS SNP.
+
+```{r, message=F}
+library(tidyverse)
+library(data.table)
+library(patchwork)
+library(GenomicRanges)
+library(plyranges)
+library(DT)
+library(plotly)
+
+otardir <- "/g/steinmetz/project/otar/"
+```
+
+<br>
+
+# GWAS selection
+
+First, we need to select the studies that we want to include for the final screen. The full script for GWAS selection is here (run on Feb. 17, 2023):
+
+```         
+/g/steinmetz/project/otar/scripts/select_gwas.R
+```
+
+I downloaded the harmonised GWAS summary statistics that are available from the [OpenGWAS database](https://gwas.mrcieu.ac.uk/) and included the following traits:
+
+```{r}
+gwas <- fread(paste0(otardir, "data/gwas_selection/filtered_studies_OpenGWAS_2023-02-10.tsv"))
+gwas %>%
+  select(trait, author, year, sample_size, ncase) %>%
+  datatable(., rownames = F, filter = "top", options = list(pageLength = 20, scrollX = F))
+```
+
+These were the autoimmune traits that had GWAS with at least 10,000 individuals of European of mixed populations. Our T-cell data is from European descent, so we need to match that.
+
+For each trait, if there were multiple GWAS, I selected the study that had the largest number of **cases** to ensure the biggest power. There is an argument to select the study with the largest sample size (e.g. UK biobank GWAS traits), which typically have more cases but fewer controls. Since their disease phenotypes are often self-reported, I decided to include the disease-specific studies with more cases instead.
+
+The script then takes the top hits from the OpenGWAS database for each of these traits using the `tophits()` function from their `ieugwasr` R package (<https://mrcieu.github.io/ieugwasr/>). The output is a list of rs IDs per trait (`snplist.tsv`).
+
+## Liftover to HG38
+
+The SNP positions in the OpenGWAS database are still in the previous Human Genome build 37. I get their positions on Human Genome build 38 using (run on Feb. 17, 2023):
+
+```         
+/g/steinmetz/project/otar/scripts/get_hg38_coordinates_for_gwas_snps.sh
+```
+
+This script retrieves information from the NCBI dbSNP database (build 156) to get the chromosome and position of each rsID for the SNPs. It then saves the rs ID, chromosome and position in a file per disease (`snplist_pos.tsv`).
+
+Some SNPs cannot be found in the query database and are lost at this step. <br>
+
+# Peak selection
+
+We received ATAC-seq and H3K27ac data from Gosia Trynka's lab. These data were generated for a paper from their lab [(Soskic et al., 2019, Nature Genetics)](https://www.nature.com/articles/s41588-019-0493-9#MOESM3). The project included getting ATAC-seq and H3K27ac ChIP-seq from several types of T-cells and stimulating them with a range of cytokines. All the data we received are here:
+
+```         
+/g/steinmetz/project/otar/data/trynka_lab/CHEERS_peak_files
+```
+
+Our T-cells are naive but stimulated with CD3/CD28+ beads and IL-2, 2-3 times in the protocol before sequencing. To best match these cells, I selected the data on naive T-cells that were treated with beads, but not with any additional cytokines, from the original publication (see supplementary table 1; cell state Th0). I included peaks from 16 hours and 5 days post stimulation. <br>
+
+## CHEERS
+
+### Create LD blocks
+
+Next, I followed the steps outlined in the [CHEERS github page](https://github.com/TrynkaLab/CHEERS). The first step creates LD blocks from the SNP lists that you input for each disease. The scripts I used here are:
+
+```         
+create_LD_blocks.py #the Python script from CHEERS
+run_create_LD_blocks.sh #running this script for our study
+```
+
+The script requires LD from an external source, which is provided by the Trynka lab, stored here:
+
+```         
+/g/steinmetz/project/otar/data/trynka_lab/LD_GRCH38
+```
+
+The tabix files in that folder gave errors, so I saved them in a sub-folder `/keep` and reconstructed the tabix files from the VCF files myself using the `tabix` tool.
+
+Some SNPs are not present in the LD files used as a reference, so those are not taken for the final enrichment. On top of that, the HLA region in chromosome 6 is excluded from those LD files. The missing NSPs can be traced in the log files here:
+
+```         
+/g/steinmetz/project/otar/data/gwas_selection/<trait>/create_LD.log 
+```
+
+### Normalise data
+
+The second step in the CHEERS workflow is a normalisation of the peak reads to the maximum read number. I used the folder `/g/steinmetz/project/otar/data/trynka_lab/CHEERS_peak_files/PEAKS` to run the normalization of the peaks identified in the naive T-cells with bead stimulation.
+
+I ran the normalisation separately for ATAC and H3K27ac data *and only for the Th0 conditions*.
+
+**Addition on April 11:** Also include 'unstimulated' condition into the normalisation, so we can include the peaks that are higher in Th0 than in the unstimulated condition. Since the Python script expects peak data files that end in `_ReadsInPeaks.txt` , I copied the peak files for the Th0 conditions to include that suffix, e.g. `ChM_naive_16H_TH0.txt` to `ChM_naive_16H_TH0.txt_ReadsInPeaks.txt`.
+
+**Addition on October 26:** I now reran the normalisation, still separate for ATAC and H3K27ac, but now including **all conditions**, such that our Th0 and unstimulated conditions can be seen in the context of all cell types used to call the peaks. I can then more easily filter out the peaks that are not present at all in these conditions.
+
+The scripts I used here are:
+
+```         
+CHEERS_normalize.py #the Python script from CHEERS
+run_CHEERS_normalize.sh #running this script for our study
+```
+
+### Select peaks that are more active in Th0 as compared to unstimulated data
+
+**Addition on April 11:** This step is not part of the original CHEERS workflow, but it is intended to keep only the peaks that are higher in the Th0 condition (stimulation with activation beads) as compared to the unstimulated condition, so that we're left with relevant peaks only.
+
+**Addition on October 20**: I have here included the extension of the ATAC-seq peaks by respectively 1, 3 and 5kb, to increase the number of SNPs that overlap our ATAC regions (and perhaps remove H3K27ac peaks only).
+
+**Addition on October 27**: I have now also included a requirement that at least one of the peaks in the Th0 conditions is in the top 50% of peaks active for that condition, by calculating the mean activity and filtering for more than that (around 0.085).
+
+The script I used is here:
+
+```         
+select_active_enhancer_peaks_and_extend_CHEERS.R
+```
+
+And the output is here:
+
+```         
+/g/steinmetz/project/otar/select_enhancer_peaks/normalised_peaks_across_conditions/*_filtered.txt
+```
+
+### Compute peak enrichment
+
+The final step in the CHEERS workflow is an enrichment of the SNP signal for each trait in those peaks.
+
+The scripts I used here are:
+
+```         
+CHEERS_computeEnrichment.py #the Python script from CHEERS
+CHEERS_computeEnrichment_extended_windows.py #the Python script from CHEERS, adjusted to deal with the extension of ATAC-seq peaks, which leads to peaks that overlap each other and one SNP can then overlap multiple ATAC regions
+run_CHEERS_computeEnrichment_extended_windows.sh #running this script for our study
+```
+
+One trait, juvenile idiopathic arthritis, did not have any SNPs that overlapped with the ATAC. It did have an overlap with the H3K27ac peaks, so it will still be in the final output.
+
+**Addition on April 11:** This peak no longer has any overlap after filtering for peaks which are more active in Th0 than the unstimulated condition, so this disease is no longer represented in the screen.<br>
+
+## Combine peaks across diseases
+
+Here, I will combine the peak-SNP overlaps from all diseases together.
+
+### Read in data
+
+```{r}
+enhdir <- "/g/steinmetz/project/otar/select_enhancer_peaks/"
+enrichdir <- paste0(enhdir, "enrichments/")
+
+#list files
+files <- list.files(enrichdir, recursive = T, pattern = "SNPsOverlappingPeaks")
+files <- files[!str_detect(files, "unfiltered")] #include only filtered output
+files <- files[str_detect(files, "000") | str_detect(files, "H3K27ac")] #include only ATAC peaks that have extended windows or H3K27ac peaks
+
+#function to read files
+read_files <- function(file){
+  print(file)
+  type <- gsub("\\/.*", "", file) #get peak type from file name
+  window <- if(str_detect(file, "000")){ #get window size from file name
+    gsub("ATAC/(\\d+)/.*", "\\1", file)
+  } else {
+    0
+  }
+  trait <- gsub(".*\\/", "", file) #get trait name from file name
+  trait <- gsub("_SNPsOverlappingPeaks.txt", "", trait) #remove suffix to get trait name
+  dm <- fread(paste0(enrichdir, file), header = T) #read file
+  dm <- dm %>%
+    mutate(type = type, #add peak type and trait info
+           trait = trait,
+           window = as.numeric(window),
+           start = start+window,
+           end = end-window,
+           peak = paste0(chr,":",start,"-",end)) %>% #define original peak without the extended window
+    select(-V9) %>%
+    rename_all(~stringr::str_replace(.,"^ChM_","")) %>% #remove ATAC/H3K27ac specific prefix
+    rename_all(~stringr::str_replace(.,"^ATAC_","")) %>%
+    rename_all(~stringr::str_replace(.,".txt$", "")) #remove .txt suffix
+}
+
+#apply function to all files
+out <- lapply(files, read_files)
+
+#combine into one data frame
+dm <- do.call(rbind, out)
+```
+
+### Adjust
+
+Add abbreviations for the diseases
+
+```{r}
+diseases <- unique(dm$trait)
+abbreviations <- c("All", "AS", "Ast", "CeD", "CD", "Ecz", "Gout", "IBD", "MS", 
+                   "PBCh", "PBC", "PSC", "Psor", "RA", "SLE", "T1D", "UC", "JIA")
+conv <- data.frame(diseases, abbreviations)
+dm <- dm %>%
+  left_join(conv, by = c("trait" = "diseases")) %>%
+  dplyr::rename(abbr = abbreviations)
+```
+
+Classify peaks as *early* (higher peaks at 16h) or *late* (higher coverage at 5 days)
+
+**Addition on April 11:** the numbers in the SNPsOverlappingPeaks files are not the normalised ones, so I exclude this part of the code from now on.
+
+```{r, eval=FALSE}
+# dm <- dm %>%
+#   mutate(diff = naive_D5_TH0 - naive_16H_TH0,
+#          early_late = case_when(diff < 0 ~ "early",
+#                                 diff > 0 ~ "late",
+#                                 diff == 0 ~ "equal"))
+```
+
+Make GenomicRanges objects to overlap the ATAC and H3K27ac peaks
+
+```{r}
+gr.atac <- dm %>%
+  filter(type == "ATAC") %>%
+  select(chr, start, end, peak, type, window) %>%
+  makeGRangesFromDataFrame(., seqnames.field="chr", start.field="start", end.field="end", keep.extra.columns=T)
+
+gr.h3k27ac <- dm %>%
+  filter(type == "H3K27ac") %>%
+  select(chr, start, end, peak, type) %>%
+  makeGRangesFromDataFrame(., seqnames.field="chr", start.field="start", end.field="end", keep.extra.columns=T)
+
+#overlap both GR objects
+gr.both <- gr.atac %>% join_overlap_inner(gr.h3k27ac)
+```
+
+## Statistics
+
+**Total number of peaks that overlap a SNP (all windows combined)**
+
+```{r}
+length(unique(dm$peak))
+```
+
+<br>
+
+**Number of peaks per peak type**
+
+```{r}
+dm %>%
+  group_by(type, window) %>%
+  select(peak, type, window) %>%
+  distinct() %>%
+  tally() 
+```
+
+This does not take into account that some of the ATAC- and H3K27ac peaks overlap. From this list, 1kb seems sufficient to find a good number of enhancers for the screen, so I'll filter to keep only 1kb window extensions. <br>
+
+**Number of ATAC peaks that overlap H3K27ac peaks**
+
+```{r}
+gr.atac.1000 <- dm %>%
+  filter(type == "ATAC") %>%
+  filter(window == 1000) %>%
+  select(chr, start, end, peak, type) %>%
+  makeGRangesFromDataFrame(., seqnames.field="chr", start.field="start", end.field="end", keep.extra.columns=T)
+
+#overlap both GR objects
+gr.both <- gr.atac.1000 %>% join_overlap_inner(gr.h3k27ac)
+
+length(unique(gr.both$peak.x))
+```
+
+So nearly all ATAC peaks are overlapped by a H3K27ac peak. This is expected, since 1) both modalities are thought to tag enhancers and 2) the peak length is much shorter for ATAC peaks vs. H3K27ac peaks. <br>
+
+**Number of H3K27ac peaks that overlap ATAC peaks**
+
+```{r}
+length(unique(gr.both$peak.y))
+```
+
+Less than half of all H3K27ac peaks overlaps an ATAC peak. Since the ATAC-seq peaks are smaller and almost always overlap a H3K27ac peak, it would make sense to prioritise designing guides for the ATAC peaks and then include the remaining H3K27ac that do not overlap any ATAC peaks. <br>
+
+**Number of unique non-overlapping peaks (only ATAC)**
+
+```{r}
+#save the peak IDs of ATAC peaks
+peak_ids_atac <- dm %>%
+  filter(type == "ATAC") %>%
+  filter(window == 1000) %>%
+  select(peak) %>%
+  distinct()
+
+nr_atac <- nrow(peak_ids_atac) #unique nr. of ATAC peaks
+
+#save the peak IDs of H3K27ac peaks
+peak_ids_h3k27ac <- dm %>%
+  filter(type == "H3K27ac") %>%
+  select(peak) %>%
+  distinct()
+
+nr_h3k27ac <- nrow(peak_ids_h3k27ac) #unique nr. of H3K27ac peaks
+
+#save the peak IDs of H3K27ac peaks that do NOT overlap one of the ATAC peaks we include
+peaks_ids_non_overlapping_h3k27ac <- setdiff(peak_ids_h3k27ac$peak, unique(gr.both$peak.y))
+
+nr_non_overlapping_h3k27ac <- length(peaks_ids_non_overlapping_h3k27ac)  #unique nr. of H3K27ac peaks that do NOT overlap ATAC peaks
+
+#peak list
+all_peaks <- peak_ids_atac$peak
+
+#total sum
+length(all_peaks)
+
+#save this list
+dm_filt <- dm %>%
+  filter(peak %in% all_peaks) %>%
+  select(-window)
+```
+
+**NB** From here onwards, all plots and statistics are only for this list of unique peaks! <br>
+
+**Total number of SNPs that overlap a peak**
+
+```{r}
+dm_filt %>%
+  select(snp) %>%
+  distinct() %>%
+  tally()
+```
+
+<br>
+
+**Number of SNPs that overlap at least one peak per trait**
+
+```{r}
+dm_filt %>%
+  group_by(trait) %>%
+  select(snp, trait) %>%
+  distinct() %>%
+  tally() %>%
+  datatable(., rownames = F, filter = "top", options = list(pageLength = 10, scrollX = T))
+```
+
+<br> <br>
+
+**Number of peaks per chromosome**
+
+```{r}
+dm_filt %>%
+  group_by(chr) %>%
+  select(peak, chr) %>%
+  distinct() %>%
+  tally() %>%
+  arrange(-n) %>%
+  datatable(., rownames = F, filter = "top", options = list(pageLength =10, scrollX = T))
+```
+
+<br> <br>
+
+**Average peak length**
+
+```{r}
+dm_filt %>%
+  select(peak, start, end, type) %>%
+  mutate(peak_length = end-start) %>%
+  group_by(type) %>%
+  summarise(min(peak_length),
+            mean(peak_length),
+            max(peak_length)) %>%
+  datatable(., rownames = F, filter = "top", options = list(pageLength = 20, scrollY = T))
+```
+
+<br>
+
+## Plotting
+
+Peak features
+
+```{r}
+#get my personal colour palette
+source("/g/scb/zaugg/claringb/tools/personal_colour_palette.R")
+
+#classify peaks by disease
+tmp <- dm_filt %>%
+  select(peak, abbr) %>% #select only peaks and the traits they are found for
+  distinct() %>%
+  group_by(peak) %>% #see if a peak overlaps SNPs from multiple diseases
+  add_tally() %>% #count number of diseases per peak
+  mutate(trait2 = case_when(n == 1 ~ abbr, #if one disease per peak, keep that disease
+                            n > 1 ~ "multiple")) %>% #if multiple, classify as "multiple traits"
+  select(peak, trait2) %>%
+  distinct() %>% #now the data frame has the same number of rows as unique peaks
+  group_by(trait2) %>%
+  tally() %>%
+  arrange(-n) %>%
+  mutate(tmp = "Disease",
+         trait2 = factor(trait2, levels=unique(trait2))) #dummy variable to use in the bar chart
+
+p1 <- ggplot(tmp, aes(x=tmp, y=n, fill=trait2, label = paste0(trait2," ", n))) +
+  geom_bar(position=position_stack(vjust = 0.5, reverse = T), stat="identity") +
+  theme_bw() +
+  coord_flip() +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "none") +
+  geom_text(position = position_stack(vjust = 0.5, reverse = T), angle = 90, size = 2) +
+  scale_fill_ga_qual()
+
+#classify peaks by type
+p2 <- dm_filt %>%
+  select(peak, type) %>% #select only peaks and the traits they are found for
+  distinct() %>%
+  group_by(type) %>%
+  tally() %>%
+  mutate(tmp = "Type") %>% #dummy variable to use in the bar chart
+  ggplot(., aes(x=tmp, y=n, fill=type, label = paste0(type,"\n", n))) +
+  geom_bar(position=position_stack(vjust = 0.5, reverse = T), stat="identity") +
+  theme_bw() +
+  coord_flip() +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "none") +
+  geom_text(position = position_stack(vjust = 0.5, reverse = T)) +
+  scale_fill_ga_qual()
+
+p1 / p2
+```
+
+## Add extra enhancers
+
+In this section, we will add more enhancers to the final prioritised list, including some enhancers that do *not* overlap any GWAS SNPs, but are important for T cell biology. We will use a T-cell GRN and T-cell-specific eQTLs for this purpose.
+
+### Based on Marson GRN ("Nila's GRN")
+
+I've previously written most of this script here:
+
+`/g/scb/zaugg/claringb/Tcell_GRN/scripts/prioritise_enhancers_MarsonGRN.qmd`
+
+#### Input data
+
+-   **Marson T cell GRN**: Gene Regulatory Network made using the `GRaNIE` package. RNA and ATAC-seq data is from [Schumann et al., 2020](https://www.nature.com/articles/s41590-020-0784-4) hg38. Made using scripts and data in `/g/scb/zaugg/zaugg_shared/data/GRN/data/CD4+/`. The GRN data here is (loosely) filtered on having TF-peak of peak-gene (FDR 0.3).
+-   **Already prioritised GWAS-based enhancers**: immune disease enhancers as shared by the Trynka lab based on [this work](https://www.nature.com/articles/s41588-019-0493-9). This list of enhancers was prioritised because they overlap a GWAS SNP for an autoimmune SNP.
+-   **H3K27ac peaks active in CD4+ Th0 T-cells**: immune disease enhancers as shared by the Trynka lab based on [this work](https://www.nature.com/articles/s41588-019-0493-9).
+-   **ATAC peaks active in CD4+ Th0 T-cells**: immune disease enhancers as shared by the Trynka lab based on [this work](https://www.nature.com/articles/s41588-019-0493-9).
+
+```{r, collapse=TRUE}
+#read GRN
+grn <- fread("/g/scb/zaugg/servaas/Projects/Tcell_Project/results/All_MinusOne_250kb_newGRaNIE/GRaNIE_SummitsFalse_OL3_Minus_250kb_ALL_TFpeak03/GRN_connections.tsv")
+
+#read prioritised peaks
+prio_enhs <- dm_filt
+
+#list enhancer peak files
+#KEEP ONLY ATAC PEAKS WITH 1KB WINDOW EXTENSION
+files <- list.files(paste0(enhdir, "normalised_peaks_across_conditions/"), recursive = F, pattern = "counts_normToMax_quantileNorm_euclideanNorm_extended_1000_filtered")
+
+#function to read enhancer files
+read_files <- function(file){
+  type <- gsub("\\_.*", "", file) #get peak type from file name
+  dm <- fread(paste0(enhdir, "normalised_peaks_across_conditions/", file), header = T) #read file
+  dm <- dm %>%
+    mutate(type = type,
+           peak.ID_Trynka = paste0(chr, ":", start, "-", end)) %>% #add peak type and trait info
+    rename_all(~stringr::str_replace(.,"^ChM_","")) %>% #remove ATAC/H3K27ac specific prefix
+    rename_all(~stringr::str_replace(.,"^ATAC_","")) %>%
+    rename_all(~stringr::str_replace(.,".txt$", "")) #remove .txt suffix
+}
+      
+#Read and combine H3K27ac and ATAC peaks into one file
+enhs <- do.call(rbind, lapply(files, read_files))
+
+#Convert the dataframes into GRanges (genomic ranges) objects
+gr.grn <- grn %>%
+  dplyr::select(TF.name, TF_peak.r, TF_peak.fdr, peak.ID_GRN = peak.ID, peak_gene.distance, peak_gene.r, peak_gene.p_adj, 
+                gene.ENSEMBL, gene.name, gene.chr, gene.start, gene.end, gene.strand) %>%
+  separate(peak.ID_GRN, into = c('peak.chr', 'tmp'), sep = ":", remove = F) %>%
+  separate(tmp, into = c('peak.start', 'peak.end'), sep = "-") %>%
+  makeGRangesFromDataFrame(., keep.extra.columns=T, seqnames.field = 'peak.chr', start.field = 'peak.start', end.field = 'peak.end')
+
+gr.enh <- makeGRangesFromDataFrame(enhs, keep.extra.columns=T)
+```
+
+Total number of enhancers in GRN: `r length(unique(grn$peak.ID))`
+
+Total number of enhancers in Open Targets list: `r nrow(enhs)`
+
+#### Overlapping
+
+We will start by overlapping the peak regions that are active in Th0 T-cells with those present in the GRN. Because the definition of an enhancer peak is not always clear, it is very well possible that the peaks overlap partially or that multiple peaks from one dataset overlap one from the other.
+
+```{r}
+#Keep only the overlapping regions
+gr.grn_overlap <- gr.grn %>% join_overlap_inner(gr.enh)
+
+#Make into dataframe
+grn_overlap <- gr.grn_overlap %>%
+  as.data.frame() %>%
+  group_by(peak.ID_Trynka) %>% 
+  mutate(count_genes = n_distinct(gene.ENSEMBL)) %>% #count number of genes targeted by peak
+  ungroup() %>%
+  group_by(gene.ENSEMBL) %>% 
+  mutate(count_peaks_Trynka = n_distinct(peak.ID_Trynka), #count number of peaks that target a gene
+         count_peaks_GRN = n_distinct(peak.ID_GRN)) %>%
+  mutate(ID = paste0(peak.ID_Trynka, "_", gene.name)) %>% #make unique peak-gene ID
+  ungroup()
+
+#Number of GRN peaks that overlap Th0 T-cell peaks
+l_grn <- length(unique(grn_overlap$peak.ID_GRN))
+
+#Number of Th0 T-cell peaks that overlap GRN peaks
+l_trynka <- length(unique(grn_overlap$peak.ID_Trynka))
+
+#Number of genes
+l_genes <- grn_overlap %>%
+  select(gene.ENSEMBL) %>%
+  distinct() %>%
+  count() %>% pull
+```
+
+Number of unique enhancers that overlap from GRN: `r l_grn`
+
+Number of unique enhancers that overlap from Open Targets list: `r l_trynka`
+
+Number of genes targeted by all of these enhancer peaks: `r l_genes`
+
+#### Filtering
+
+Filtering will always be a little arbitrary, but in order to make sure we have a list of enhancers that are likely to target their gene in CD4+ T cells, I will require:
+
+-   at least one peak-gene correlation of r \> 0.6764030 (= 99.5th percentile)
+-   at least one peak-gene adjusted p-value of \< 0.05
+-   enhancers that are more active in Th0 compared to unstimulated
+
+Some enhancers target multiple genes. For those enhancers, some of the enhancer-gene links may pass the filtering strategy while others do not. If at least one enhancer-gene link passes the filtering criteria, I include all target genes in the table below. This way we can know which genes we expect to be affected by the enhancer perturbation.
+
+```{r}
+threshold <- quantile(grn_overlap$peak_gene.r, .995)
+
+filter <- grn_overlap %>%
+  filter(peak_gene.p_adj <= 0.05) %>% #p-value of peak-gene connection
+  filter(peak_gene.r > threshold) %>% #peak-gene connection correlation must be in the 99.5th percentile
+  filter(naive_D5_TH0 - naive_16H_UNS > 0 | naive_16H_TH0 - naive_16H_UNS > 0) %>% #peak more active in Th0 states as compared to unstimulated
+  select(ID, peak.ID_Trynka, peak.ID_GRN, gene.name, gene.ENSEMBL, type, count_genes) %>%
+  distinct()
+
+grn_overlap <- grn_overlap %>%
+  mutate(selected = case_when(ID %in% filter$ID ~ "selected enhancer-gene pair",
+                              peak.ID_Trynka %in% filter$peak.ID_Trynka ~ "selected enhancer",
+                              !peak.ID_Trynka %in% filter$peak.ID_Trynka ~ "not selected"))
+#table of genes
+gene_table <- grn_overlap %>%
+  select(gene.ENSEMBL, selected) %>%
+  distinct() %>%
+  group_by(selected) %>%
+  tally()
+
+#Number of unique enhancers
+nr <- length(unique(filter$peak.ID_Trynka))
+
+#Output data
+selection <- grn_overlap %>%
+  filter(selected != "not selected") %>%
+  select(ID, peak.ID_Trynka, peak.ID_GRN, gene.name, gene.ENSEMBL, peak_gene.distance, peak_gene.r, peak_gene.p_adj, type, count_genes, selected) %>%
+  distinct()
+```
+
+**Number of unique prioritised enhancers (Open Targets definition)**: `r nr`
+
+**Number of unique genes significantly targeted by the enhancers**:
+
+```{r}
+datatable(gene_table, rownames = T, filter="top")
+```
+
+How many of these overlap the enhancers that we have already prioritised (if any)?
+
+```{r}
+selection <- selection %>%
+  mutate(prioritized = case_when(peak.ID_Trynka %in% prio_enhs$peak ~ "yes",
+                                 !peak.ID_Trynka %in% prio_enhs$peak ~ "no"))
+
+selection %>% 
+  select(peak.ID_Trynka, prioritized) %>%
+  distinct() %>%
+  group_by(prioritized) %>%
+  tally
+```
+
+#### Plots
+
+**!NB Some of the selected enhancer-gene pairs have a correlation \< 0.7 despite the filtering strategy set out above. This is because 1 peak in the list of enhancers from the Trynka data can overlap multiple peaks in the list of enhancers from the Marson GRN. As such, each peak-gene pair can consist of multiple peak-gene pairs in the GRN space, which each have their own correlation coefficient, p-value, etc.**
+
+```{r message=F, warning=F}
+p <- ggplot(grn_overlap, aes(x=peak_gene.r, y=peak_gene.distance, colour=selected, alpha=selected)) +
+  geom_point(aes(text=paste0("peak: ", peak.ID_Trynka, "\ngene: ", gene.name, "\npeak-gene P-value: ", peak_gene.p_adj)), size = 1) +
+  scale_colour_manual(values = c(ga_lightgrey, ga_orange, ga_maroon)) +
+  scale_alpha_manual(values = c(0.1, 0.8, 1)) +
+  theme_bw() +
+  theme(legend.title = element_blank()) +
+  ggtitle('Peak to gene distance and correlation values') +
+  ylab('Peak to gene distance\n') +
+  xlab('\nCorrelation between peak and gene (r)')
+ggplotly(p)
+```
+
+```{r message=F, warning=F}
+ggplot(grn_overlap) +
+  geom_histogram(aes(x=peak_gene.distance, fill = selected),
+                 alpha=0.6, bins=50) +
+  scale_fill_manual(values = c(ga_lightgrey, ga_orange, ga_maroon)) +
+  theme_bw() +
+  theme(legend.title = element_blank()) +
+  ggtitle('Distribution of peak to gene distances') +
+  xlab('\nPeak to gene distance') +
+  ylab('Count\n')
+```
+
+```{r message=F, warning=F}
+grn_overlap %>%
+  select(seqnames, start, end, selected) %>%
+  distinct() %>%
+  ggplot(.) +
+  geom_histogram(aes(x=seqnames, fill = selected), 
+                 stat="count", alpha=0.6) +
+  scale_fill_manual(values = c(ga_lightgrey, ga_orange, ga_maroon)) +
+  theme_bw() +
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  ggtitle("Distribution of enhancers among chromosomes") +
+  xlab('\nChromosome') +
+  ylab('Count\n')
+```
+
+#### Format these enhancers like the main list
+
+```{r}
+#make format same as initial list
+dm_grn <- grn_overlap %>%
+  filter(selected != "not selected") %>%
+  separate(peak.ID_Trynka, into = c("chr", "start_peak", "end_peak"), remove = F) %>%
+  mutate(window = 1000,
+         start_peak = as.numeric(start_peak)+window, 
+         end_peak = as.numeric(end_peak)-window,
+         peak.ID_original = paste0(chr, ":", start_peak, "-", end_peak)) %>% #define original peak without the extended window and use those coordinates for final list
+  filter(!peak.ID_original %in% prio_enhs$peak) %>% #remove peaks that were already prioritized
+  mutate(snp = NA, 
+         pos = NA,
+         trait = "GRN", 
+         abbr = "GRN",
+         gene = gene.ENSEMBL) %>%
+  select(snp, pos, chr, start = start_peak, end = end_peak, naive_16H_TH0, naive_D5_TH0, naive_16H_UNS, type, trait, peak = peak.ID_original, abbr, gene) %>%
+  distinct()
+```
+
+### eQTL
+
+#### Input data
+
+-   **T cell eQTLs**: eQTLs from CD4+ naive T cells, unstimulated and 16h, 40h and 5d after stimulation with anti-CD3/CD28 beads, from [Soskic et al., Nature Genetics 2022](https://www.nature.com/articles/s41588-022-01066-3). Calculated with tensorQTL, output columns explained [here](https://github.com/broadinstitute/tensorqtl/blob/master/docs/outputs.md).
+-   **H3K27ac peaks active in CD4+ Th0 T-cells**: immune disease enhancers as shared by the Trynka lab based on [this work](https://www.nature.com/articles/s41588-019-0493-9).
+-   **ATAC peaks active in CD4+ Th0 T-cells**: immune disease enhancers as shared by the Trynka lab based on [this work](https://www.nature.com/articles/s41588-019-0493-9).
+
+```{r, collapse=TRUE}
+#read eQTLs
+eqtl_files <- list.files(paste0(otardir, "data/trynka_lab/eQTLs"), pattern = "tensor", full.names = T)
+
+fread_eqtl <- function(file){
+  dm <- fread(file) #eqtl files from CD4+ naive T cells
+  name <- gsub(pattern = "_500kb_combined.tsv.gz", replacement = "", basename(file))
+  dm <- dm %>%
+    filter(pval_perm < 0.05) %>% #keep only significant effects
+    mutate(dataset = name)
+}
+
+eqtl <- do.call(rbind, lapply(eqtl_files, fread_eqtl)) #eQTLs
+
+#make eQTL results into GRanges object
+gr.eqtl <- eqtl %>%
+  separate(variant_id, remove = F, into = c("chr", "pos", "a1", "a2")) %>%
+  makeGRangesFromDataFrame(., seqnames.field="chr", start.field="pos", end.field="pos", keep.extra.columns=T)
+
+seqlevelsStyle(gr.eqtl) <- "UCSC"
+```
+
+#### Overlapping
+
+We will start by overlapping the peak regions that are active in Th0 T-cells with those present in the eQTLs. Because the definition of an enhancer peak is not always clear, it is very well possible that the peaks overlap partially or that multiple peaks from one dataset overlap one from the other.
+
+```{r}
+#Keep only the overlapping regions
+gr.eqtl_overlap <- gr.eqtl %>% join_overlap_inner(gr.enh)
+
+#Make into dataframe
+eqtl_overlap <- gr.eqtl_overlap %>%
+  as.data.frame() %>%
+  group_by(peak.ID_Trynka) %>% 
+  mutate(count_genes = n_distinct(phenotype_id)) %>% #count number of genes targeted by peak
+  ungroup() %>%
+  group_by(phenotype_id) %>% 
+  mutate(count_peaks_Trynka = n_distinct(peak.ID_Trynka)) %>% #count number of peaks that target a gene
+  ungroup() %>%
+  mutate(ID = paste0(variant_id, "_", phenotype_id))
+
+#Number of eQTL SNPs that overlap Th0 T-cell peaks
+l_eqtl <- length(unique(eqtl_overlap$variant_id))
+
+#Number of Th0 T-cell peaks that overlap GRN peaks
+l_trynka <- length(unique(eqtl_overlap$peak.ID_Trynka))
+
+#Number of genes
+l_genes <- eqtl_overlap %>%
+  select(phenotype_id) %>%
+  distinct() %>%
+  count() %>% pull
+```
+
+Number of unique enhancers that overlap from Open Targets list: `r l_trynka`
+
+Number of unique eQTL SNPs that overlap the enhancer list: `r l_eqtl`
+
+Number of genes targeted by all of these enhancer peaks: `r l_genes`
+
+#### Filtering
+
+Filtering will always be a little arbitrary, but in order to make sure we have a list of eQTLs that are likely to play an important role in CD4+ T cells, I will require:
+
+-   at least eQTL p-value of \< 0.0005 (based on column `pval_beta`)
+-   enhancers that are more active in Th0 compared to unstimulated
+-   eQTL SNP has a minor allele frequency of \> 0.05
+-   enhancer peak overlaps with eQTL that is found in at least one of the stimulated conditions (unstimulated, stimulated 16h, 40h, 5d)
+-   an absolute effect size (regression slope based on column `slope`) of at least 1
+-   keep only ATAC peak if both ATAC and H3K27ac peaks overlap an eQTL
+
+Some enhancers target multiple genes. For those enhancers, some of the enhancer-gene links may pass the filtering strategy while others do not. If at least one enhancer-gene link passes the filtering criteria, I include all target genes in the table below. This way we can know which genes we expect to be affected by the enhancer perturbation.
+
+```{r}
+filter <- eqtl_overlap %>%
+  filter(pval_beta <= 0.0005) %>% #p-value of peak-gene connection
+  filter(naive_D5_TH0 - naive_16H_UNS > 0 | naive_16H_TH0 - naive_16H_UNS > 0) %>% #peak more active in Th0 states as compared to unstimulated
+  filter(maf > 0.05) %>%
+  select(ID, peak.ID_Trynka, type, dataset, slope, type) %>%
+  group_by(peak.ID_Trynka) %>%
+  mutate(count_status = n_distinct(dataset)) %>%
+  ungroup() %>%
+  filter(count_status > 1 | (count_status == 1 & dataset != "CD4_Naive_uns_0h_500kb_window_tensorQTL.txt")) %>%
+  filter(abs(slope) > 1) %>%
+  group_by(type) %>%
+  distinct()
+
+## ISSUES
+#2. one eQTL (SNP-gene pair) will have 2 p-values, because it's present in 2 stimulation conditions (maybe I just want to remove p-value here)
+
+eqtl_overlap <- eqtl_overlap %>%
+  mutate(selected = case_when(ID %in% filter$ID & peak.ID_Trynka %in% filter$peak.ID_Trynka ~ "selected enhancer-gene (eQTL) pair",
+                              peak.ID_Trynka %in% filter$peak.ID_Trynka ~ "selected enhancer (eQTL SNP)",
+                              !peak.ID_Trynka %in% filter$peak.ID_Trynka ~ "not selected"))
+#table of genes
+gene_table <- eqtl_overlap %>%
+  select(phenotype_id, selected) %>%
+  distinct() %>%
+  group_by(selected) %>%
+  tally()
+
+#Number of unique enhancers
+nr <- length(unique(filter$peak.ID_Trynka))
+
+#Output data
+selection <- eqtl_overlap %>%
+  filter(selected != "not selected") %>%
+  select(ID, peak.ID_Trynka, variant_id, phenotype_id, pval_perm, type, count_genes, selected, naive_16H_TH0, naive_D5_TH0, naive_16H_UNS) %>%
+  distinct()
+```
+
+**Number of unique prioritised enhancers (Open Targets definition)**: `r nr`
+
+**Number of unique genes significantly targeted by the enhancers**:
+
+```{r}
+selection <- selection %>%
+  mutate(prioritized = case_when(peak.ID_Trynka %in% prio_enhs$peak ~ "yes",
+                                 !peak.ID_Trynka %in% prio_enhs$peak ~ "no"))
+
+selection %>% 
+  select(peak.ID_Trynka, prioritized) %>%
+  distinct() %>%
+  group_by(prioritized) %>%
+  tally
+```
+
+#### Format these enhancers like the main list
+
+```{r}
+#make format same as initial list
+dm_eqtl <- selection %>%
+  separate(variant_id, into = c("chrom", "pos", "a1", "a2"), remove = F) %>%
+  separate(peak.ID_Trynka, into = c("chr", "start_peak", "end_peak"), remove = F) %>%
+  mutate(window = 1000,
+         start_peak = as.numeric(start_peak)+window, 
+         end_peak = as.numeric(end_peak)-window,
+         peak.ID_original = paste0(chr, ":", start_peak, "-", end_peak)) %>% #define original peak without the extended window and use those coordinates for final list
+  filter(!peak.ID_original %in% prio_enhs$peak) %>% #remove peaks that were already prioritized
+  mutate(trait = "eQTL", 
+         abbr = "eQTL",
+         gene = phenotype_id) %>%
+  select(snp = variant_id, 
+         pos, chr, start = start_peak, end = end_peak, 
+         naive_16H_TH0, naive_D5_TH0, naive_16H_UNS, 
+         type, trait, peak = peak.ID_original, abbr, gene) %>%
+  distinct()
+```
+
+### Nila's experiment
+
+Include enhancers that Nila tested in her experiment for the work with Neha, because they worked quite well individually, and we might be able to use those as validations later on. They are located in
+
+`/g/steinmetz/project/otar/data/Neha_Nila_validation_experiment/Selected_gRNAs_Final.xlsx`
+
+```{r}
+validation <- readxl::read_excel(paste0(otardir, "data/Neha_Nila_validation_experiment/Selected_gRNAs_Final.xlsx"))
+
+#make format same as initial list
+dm_val <- validation %>%
+  separate(PeakID, into = c("chr", "start", "end"), remove = F) %>%
+  mutate(trait = "Nila_validation", 
+         abbr = "val",
+         gene = `Target genes`,
+         snp = NA,
+         pos = NA,
+         naive_16H_TH0 = NA,
+         naive_D5_TH0 = NA,
+         naive_16H_UNS = NA,
+         type = "H3K27ac") %>%
+  filter(if_any(gene, ~ !is.na(.))) %>% #remove rows without target gene (controls)
+  select(snp, pos, chr, start, end, 
+         naive_16H_TH0, naive_D5_TH0, naive_16H_UNS, 
+         type, trait, peak = PeakID, abbr, gene) %>%
+  distinct()
+
+#select only the two enhancers that worked in Nila's experiment
+dm_val <- dm_val %>%
+  filter(str_detect(gene, "IL6ST") | str_detect(gene, "CTLA4"))
+```
+
+### Control enhancers
+
+Include enhancers that are have worked well in our pilots and other controls. Dewi came up with this list.
+
+**!!!!NB these enhancer definitions do not overlap with the ones I'm using here - to check!!**
+
+#### Based on consistent results in our pilots
+
+JUND_chr19:18291227−18293782\
+CCND2_chr12:4153422−4154015\
+CAB39_chr2:230658624−230659752\
+SP140_chr2:230225130−230226457\
+PIM1_chr6:37050015−37051033
+
+#### Based on consistency between GSK data and our data:
+
+PKM_chr15:72237274−72237898\
+RNF213_chr17:80254661−80255197
+
+#### Best hit from GSK (we tested another enhancer for this gene):
+
+CTSC_chr11:88421598−88421898
+
+#### Promoter regions:
+
+Promoter regions for these genes are derived from Biomart ENSEMBL v110, sorted for protein_coding genes and protein_coding transcripts. I then chose the TSS that is annotated as "principal1" in APRIS.
+
+CD4: chr12:6789528\
+CD28: chr2:203706639\
+CTLA4: chr2:203867771\
+(B2M: chr15:44711513) —\> this one is too highly expressed\
+(BST2: chr19:17405630) —\> this one is already a target of another enhancer\
+CD81: chr11:2377310 ENSG00000110651\
+IL2RA: chr10:6062367
+
+```{r}
+dm_ctrl <- data.frame(snp = NA,
+                        pos = NA,
+                        chr = c("chr19", "chr12", "chr2", "chr2","chr6", 
+                                "chr15", "chr17", "chr11",
+                                "chr12", "chr2", "chr2", "chr11", "chr10"),
+                        start = c(18291227, 4153422, 230658624, 230225130, 37050015, 
+                                  72237274, 80254661, 88421598,
+                                  6789528, 203706639, 203867771, 2377310, 6062367),
+                        end = c(18293782, 4154015, 230659752, 230226457, 37051033, 
+                                72237898, 80255197, 88421898,
+                                6789528, 203706639, 203867771, 2377310, 6062367),
+                        naive_16H_TH0 = NA,
+                        naive_D5_TH0 = NA,
+                        naive_16H_UNS = NA,
+                        type = NA,
+                        trait = c(rep("control_pilot", 5), 
+                                  rep("control_gsk", 3),
+                                  rep("control_promoter", 5)),
+                        abbr = "ctrl", 
+                        gene = c("JUND", "CCND2", "CAB39", "SP140", 
+                                 "PIM1", "PKM", "RNF213", "CTSC",
+                                 "CD4", "CD28", "CTLA4", "CD81", "IL2RA")) %>%
+  mutate(peak = paste0(chr, ":", start, "-", end)) %>%
+  select(snp, pos, chr, start, end, naive_16H_TH0, naive_D5_TH0, naive_16H_UNS, type, trait, peak, abbr, gene)
+```
+
+## Combine peak lists
+
+Combine all the enhancer prioritisation lists into one final list for the screen.
+
+```{r}
+#Add gene column for disease-based enhancers
+dm_filt <- dm_filt %>%
+  mutate(gene = NA)
+
+#combine all lists
+final_list <- rbind(dm_filt, dm_grn, dm_eqtl, dm_ctrl, dm_val)
+
+#make into bed file format
+bed <- final_list %>%
+  select(chr, start, end, peak) %>%
+  distinct()
+
+#make bed file for SNPs only
+bed_snp <- final_list %>%
+  mutate(end = as.numeric(pos)+1) %>%
+  select(chr, pos, end, snp, trait) %>%
+  distinct()
+
+#where does each enhancer come from
+source_table <- final_list %>%
+  select(peak, trait) %>%
+  distinct() %>%
+  group_by(trait) %>%
+  tally()
+
+datatable(source_table, rownames = T, filter="top")
+
+#where does each enhancer come from (chromosome)
+chr_table <- final_list %>%
+  select(peak, chr) %>%
+  distinct() %>%
+  group_by(chr) %>%
+  tally()
+
+datatable(chr_table, rownames = T, filter="top")
+
+#sanity checks
+#are peaks consistent with regions?
+tmp <- final_list %>%
+  mutate(peak2 = paste0(chr, ":", start, "-", end))
+table(tmp$peak == tmp$peak2)
+
+#are peaks consistent with original peak data?
+peak_data <- fread("/g/steinmetz/project/otar/select_enhancer_peaks/normalised_peaks_across_conditions/ATAC_counts_normToMax_quantileNorm_euclideanNorm_filtered.txt")
+
+peak_data <- peak_data %>%
+  mutate(peak = paste0(chr, ":", start, "-", end))
+
+table(final_list$peak %in% peak_data$peak)
+
+final_list %>%
+  filter(!peak %in% peak_data$peak) %>%
+  group_by(trait) %>%
+  tally() #these all make sense
+
+length(unique(final_list$peak))
+```
+
+\
+
+\
+
+**Total number of prioritised enhancers**: `r length(unique(final_list$peak))`
+
+## Save data
+
+```{r}
+#Save file with all peaks that overlap GWAS SNPs
+fwrite(dm, paste0(enhdir, "/All_peaks_for_all_traits_combined_", Sys.Date(), ".tsv"), sep="\t")
+
+#Save file with the unique list of peaks that overlap GWAS SNPs
+fwrite(dm_filt, paste0(enhdir, "/Unique_peaks_for_all_traits_combined_", Sys.Date(), ".tsv"), sep="\t")
+
+#Save file with the full list of peaks that we will include in the final screen
+fwrite(final_list, paste0(enhdir, "/Final_peaks_large_screen_", Sys.Date(), ".tsv"), sep="\t")
+
+#Save bed file
+fwrite(bed, paste0(enhdir, "/Final_peaks_large_screen_", Sys.Date(), ".bed"), sep="\t", col.names = F)
+
+#Save bed file with SNP locations
+fwrite(bed_snp, paste0(enhdir, "/Final_SNPs_large_screen_", Sys.Date(), ".bed"), sep="\t", col.names = F)
+```
+
+## Session Info
+
+```{r}
+sessionInfo()
+```
