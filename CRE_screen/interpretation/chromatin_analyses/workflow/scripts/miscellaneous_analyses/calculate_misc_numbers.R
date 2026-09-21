@@ -1,8 +1,5 @@
 ## Calculate miscellaneous enhancer screen numbers
 
-save.image("RDA/calculate_misc_numbers.rda")
-stop()
-
 suppressPackageStartupMessages({
   library(readr)
   library(dplyr)
