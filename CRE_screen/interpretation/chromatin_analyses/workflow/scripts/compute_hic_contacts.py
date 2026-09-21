@@ -40,7 +40,7 @@ def get_eg_int_freqs(etp, hic, hic_res):
   etp_hic = list()
   chroms = etp['pert_chr'].unique()
   
-  # get intaraction frequencies for all E-G pairs on the same chromosome (exclude trans-pairs)
+  # get interaction frequencies for all E-G pairs on the same chromosome (exclude trans-pairs)
   print("Getting interaction frequencies for:")
   for chrom in chroms:
     print("  " + chrom)

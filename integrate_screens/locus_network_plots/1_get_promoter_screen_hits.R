@@ -3,7 +3,6 @@
 suppressPackageStartupMessages({
   library(data.table)
   library(dplyr)
-  library(here)
 })
 
 # list of promoter screen output files

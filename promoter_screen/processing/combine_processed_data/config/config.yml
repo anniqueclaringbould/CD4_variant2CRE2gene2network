@@ -18,7 +18,6 @@ sceptre:
   moi: "high"
   side: "both"
   resampling_mechanism: "permutations"
-  formula: "~log(response_n_umis) + log(response_n_nonzero) + log(grna_n_umis + 1) + log(grna_n_nonzero + 1) + chip + panel"
 
 # QC filtered combined seurat object
 filtered_seurat: "/g/steinmetz/project/otar_2063/promoter_screen/interpretation/seurat_qc/output/combined/Seurat_merged_QC_2025-08-04.rds"
