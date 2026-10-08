@@ -306,7 +306,6 @@ p1 <- ggplot(filter(plot_etp, assay == "Effect size"),
   geom_boxplot() +
   stat_pvalue_manual(data = filter(kw_tests, assay == "Effect size"), y.position = 2.25, size = 3,
                      label = "P adj. {p.adj.plot}", remove.bracket = TRUE, inherit.aes = FALSE) +
-  #labs(y = bquote(atop("CRISPRi effect size", "(log"[2] ~ "fold change)"))) +
   labs(y = expression("log"[2] ~ "fold change")) +
   scale_fill_manual(values = category_colors) +
   scale_y_continuous(limits = c(-4, 2.5)) +

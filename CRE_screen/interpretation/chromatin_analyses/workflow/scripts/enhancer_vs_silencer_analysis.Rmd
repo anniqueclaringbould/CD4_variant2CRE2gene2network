@@ -1,0 +1,611 @@
+---
+title: "Analyze silencing elements"
+author: "Andreas R. Gschwind"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setupDocument, include=FALSE}
+# set output html chunk options
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+## Goal
+Analyze silencing elements to assess how likely these are to be true distal regulatory elements.
+```{r attachPackages}
+library(tidyverse)
+library(data.table)
+library(cowplot)
+library(GenomicRanges)
+library(rtracklayer)
+```
+
+```{r generalParams}
+# colors for interaction classes
+class_colors <- c(enhancer = "steelblue", silencer = "red3")
+```
+
+
+***
+
+## Used data
+Annotated CRE screen results are used as main input for these analyses. Only enhancer-like CRE-gene
+interactions are used, since these are a confident list of CRE-gene regulatory interactions. 
+```{r loadMainData}
+# load annotated main results table
+etp <- fread(snakemake@input$annot_pairs)
+
+# for control perturbations which were in multiple panels, select the most significant one
+etp_ctrl <- etp %>% 
+  filter(ctrl_perturbation == TRUE) %>% 
+  group_by(response_id, grna_target) %>% 
+  slice_min(p_value, n = 1, with_ties = FALSE)
+
+# add back to results table with discovery pairs
+etp <- etp %>% 
+  filter(ctrl_perturbation == FALSE) %>% 
+  bind_rows(etp_ctrl) %>% 
+  arrange(desc(p_value))
+
+# add pseudocount to Hi-C interaction frequencies
+etp <- mutate(etp, hic_int_freq = hic_int_freq + 1)
+
+# filter out any trans-chromosomal interactions
+etp <- filter(etp, pert_chr == gene_chr)
+
+# extract significant hits to analyze
+sig_distal_hits <- etp %>% 
+  filter(enhancer_like_interaction) %>% 
+  filter(abs(dist_to_tss) <= 1e6)
+
+# add effect direction and unique identifier for each pair
+sig_distal_hits <- sig_distal_hits %>% 
+  mutate(int_class = if_else(log_2_fold_change <= 0, true = "enhancer", false = "silencer")) %>% 
+  group_by(grna_target) %>% 
+  mutate(elem_class = case_when(
+    all(int_class == "enhancer") ~ "enhancer",
+    all(int_class == "silencer") ~ "silencer",
+    TRUE ~ "bidirectional"
+  )) %>% 
+  ungroup() %>% 
+  unite(col = "pair_uid", grna_target, response_id, sep = "|", remove = FALSE)
+```
+
+***
+
+## Effect direction as function of distance to TSS
+Plot effect sizes as well as percentage of silencers (up-regulation upon perturbation) elements as
+function of distance to TSS.
+```{r, fig.width=10, fig.height=3.5}
+# make distance to tss bin an ordered factor
+all_bins <- c("1500-10k", "10k-100k", "100k-1Mb")
+sig_distal_hits <- sig_distal_hits %>% 
+  mutate(distToTSS_bin = factor(distToTSS_bin, levels = all_bins, ordered = TRUE))
+
+# calculate proportion of element class per distance bin
+prop_int_class_dist <- sig_distal_hits %>% 
+  count(distToTSS_bin, int_class) %>%
+  group_by(distToTSS_bin) %>%
+  mutate(prop = n / sum(n))
+
+# plot effect sizes as function of distance to TSS
+p1 <- ggplot(sig_distal_hits, aes(x = dist_to_tss, y = log_2_fold_change, color = int_class)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  geom_vline(xintercept = c(1e4, 1e5, 1e6), linetype = "dashed", color = "gray") +
+  labs(title = "Effect size vs. distance", x = "Distance to TSS (bp)", y = "Log2 fold change",
+       color = "Interaction class") +
+  scale_color_manual(values = class_colors) +
+  scale_x_log10() +
+  geom_point() +
+  theme_classic()
+
+# plot the proportion of silencers as funcion of distance to TSS (bins)
+p2 <- ggplot(prop_int_class_dist, aes(x = distToTSS_bin, y = prop, fill = int_class)) +
+  geom_col(position = "fill") +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray") +
+  labs(title = "Proportion effect direction", x = "Distance to TSS (bin)",
+       y = "Proportion of CRE-gene interactions", fill = "Interaction class") +
+  scale_fill_manual(values = class_colors) +
+  theme_classic()
+
+# arrange into one figure
+plot_grid(p1, p2, nrow = 1, rel_widths = c(1, 0.75))
+```
+
+Overall `r round(mean(sig_distal_hits$int_class == "silencer") * 100, digits = 2)` of CRE-gene
+interactions within 1Mb are "silencers". The proportion of silencing interactions increase as a
+function of distance to TSS, which is in line with previous work (e.g. Ray et al., 2025).
+
+To verify this, let's repeat the same analysis with the Ray et al., 2025 dataset:
+```{r}
+# load main results table and filter for significant distal element-gene interactions
+ray_sig_distal <- fread(snakemake@input$ray2025_results) %>% 
+  filter(DistalElement_Gene == TRUE, significant_wo_pos_controls_20fdr == TRUE)
+
+# bin hits by distance to TSS
+ray_sig_distal <- ray_sig_distal %>% 
+    mutate(distToTSS_bin = case_when(
+      distance_to_abc_canonical_TSS <= 1e4 ~ "<10k",
+      distance_to_abc_canonical_TSS <= 1e5 ~ "10k-100k",
+      distance_to_abc_canonical_TSS <= 1e6 ~ "100k-1Mb",
+      TRUE ~ ">1Mb"
+  )) %>% 
+  mutate(distToTSS_bin = factor(distToTSS_bin, levels = c("<10k", "10k-100k", "100k-1Mb", ">1Mb"),
+                                ordered = TRUE))
+
+# add interaction class
+ray_sig_distal <- ray_sig_distal %>% 
+  mutate(int_class = if_else(log_2_FC_effect_size <= 0, true = "enhancer", false = "silencer"))
+
+# calculate proportion of element class per distance bin
+ray_prop_int_class_dist <- ray_sig_distal %>% 
+  count(cell_type, distToTSS_bin, int_class) %>%
+  group_by(cell_type, distToTSS_bin) %>%
+  mutate(prop = n / sum(n))
+
+# only retain the same distance bins as in our data
+ray_prop_plot <- filter(ray_prop_int_class_dist, distToTSS_bin != ">1Mb")
+
+# plot the proportion of element class as function of distance to TSS (bin)
+ggplot(ray_prop_plot, aes(x = distToTSS_bin, y = prop, fill = int_class)) +
+  facet_wrap(~cell_type) +
+  geom_col(position = "fill") +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray") +
+  labs(title = "Proportion effect direction Ray et al., 2025", x = "Distance to TSS (bin)",
+       y = "Proportion of CRE-gene interactions", fill = "Interaction class") +
+  scale_fill_manual(values = class_colors) +
+  theme_classic() +
+  theme(strip.background = element_blank())
+```
+Rates of "silencer" CRE-gene interactions are even higher in this screen. This might be driven by
+the random screen designs of this study and the paper argues that distal regulatory interactions
+are more likely to be the results of indirect effects. This might apply to our dataset as well and
+we should discuss this.
+
+As a third dataset, let's compare it to the K562 enhancer perturbation "gold-standard" dataset from
+Gasperini et al., 2019.
+```{r, fig.width=10, fig.height=3.5}
+# load ENCODE processed CRISPR data and extract Gasperini data. Caveats: this is from our own
+# processing, which is similar to this screen but isn't the published version.
+gasp <- fread(snakemake@input$gasperini2019_results)
+
+# filter for significant distal hits within 1Mb 
+gasp_sig <- gasp %>% 
+  filter(Significant == TRUE, !is.na(EffectSize)) %>% 
+  filter(abs(distToTSS) > 1500, abs(distToTSS) <= 1e6) %>% 
+  filter(ValidConnection == "TRUE")  # filters out any promoter promoter and own target gene overlap
+
+# convert log fold change to log2 fold change
+gasp_sig <- mutate(gasp_sig, log_2_fold_change = EffectSize / log(2))
+
+# bin hits by distance to TSS
+gasp_sig <- gasp_sig %>% 
+    mutate(distToTSS_bin = case_when(
+      abs(distToTSS) <= 1e4 ~ "<10k",
+      abs(distToTSS) <= 1e5 ~ "10k-100k",
+      abs(distToTSS) <= 1e6 ~ "100k-1Mb",
+      TRUE ~ ">1Mb"
+  )) %>% 
+  mutate(distToTSS_bin = factor(distToTSS_bin, levels = c("<10k", "10k-100k", "100k-1Mb", ">1Mb"),
+                                ordered = TRUE))
+
+# add interaction class
+gasp_sig <- gasp_sig %>% 
+  mutate(int_class = if_else(EffectSize <= 0, true = "enhancer", false = "silencer"))
+
+# calculate proportion of element class per distance bin
+gasp_prop <- gasp_sig %>% 
+  count(distToTSS_bin, int_class) %>%
+  group_by(distToTSS_bin) %>%
+  mutate(prop = n / sum(n))
+
+# plot effect sizes as function of distance to TSS
+p1 <- ggplot(gasp_sig, aes(x = abs(distToTSS), y = log_2_fold_change, color = int_class)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  geom_vline(xintercept = c(1e4, 1e5, 1e6), linetype = "dashed", color = "gray") +
+  labs(title = "Effect size vs. distance", x = "Distance to TSS (bp)", y = "Log2 fold change",
+       color = "Interaction class") +
+  scale_color_manual(values = class_colors) +
+  scale_x_log10() +
+  geom_point() +
+  theme_classic()
+
+# plot the proportion of element class as function of distance to TSS (bin)
+p2 <- ggplot(gasp_prop, aes(x = distToTSS_bin, y = prop, fill = int_class)) +
+  geom_col(position = "fill") +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray") +
+  labs(title = "Proportion effect direction Gasperini et al., 2019", x = "Distance to TSS (bin)",
+       y = "Proportion of CRE-gene interactions", fill = "Interaction class") +
+  scale_fill_manual(values = class_colors) +
+  theme_classic() +
+  theme(strip.background = element_blank())
+
+# arrange into one figure
+plot_grid(p1, p2, nrow = 1, rel_widths = c(1, 0.75))
+```
+
+Although the Gasperini et al., 2019 dataset does not have as many silencers close to the TSS, it has
+comparable numbers of silencer-like interactions beyond 100kb. This is again in line with the
+higher proportion of indirect effects at longer ranges assumption. Note that Gasperini et al.,
+applied stronger prioritization for enhancer chromatin states that us, potentially reducing the
+number of tested silencer elements. 
+
+As a last piece, let's calculate the expected baseline rate of positive effects on expression from 
+indirect, not CRE-mediated effects, from trans-chromosome tests.
+```{r, fig.height=5, fig.width=3}
+# load all tested pairs, including trans-acting interactions
+all_pairs <- fread(snakemake@input$all_pairs)
+
+# filter for significant trans-chromosome pairs involving distal elements
+all_sig_trans_pairs <- all_pairs %>% 
+  filter(significant == TRUE, pert_chr != gene_chr, element_type == "intergenic") %>% 
+  mutate(int_class = if_else(log_2_fold_change <= 0, true = "enhancer", false = "silencer"))
+
+# calculate proportion of silencers and enhancers
+sig_trans_prop <- all_sig_trans_pairs %>% 
+  count(int_class) %>%
+  mutate(prop = n / sum(n)) %>% 
+  mutate(distToTSS_bin = "trans-chrom.")
+
+# plot proportion silencer- and enhancer-like effects in significant trans-chromosome interactions
+ggplot(sig_trans_prop, aes(x = distToTSS_bin, y = prop, fill = int_class)) +
+  geom_col(position = "fill") +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray") +
+  labs(title = "Trans-chrom. effects", y = "Proportion of CRE-gene interactions",
+       fill = "Interaction class") +
+  scale_fill_manual(values = class_colors) +
+  theme_classic() +
+  theme(strip.background = element_blank(), axis.title.x = element_blank())
+```
+
+
+***
+
+## Chromatin properties
+Explore various chromatin properties of silencer-like vs. enhancer-like elements.
+
+### Distance to target genes
+Compare distance to TSS between silencer-like and enhancer-like interactions:
+```{r, fig.height=5, fig.width=6}
+# plot distance to TSS distributions
+ggplot(sig_distal_hits, aes(x = int_class, y = abs(dist_to_tss) / 1000, fill = int_class)) +
+  geom_violin() +
+  geom_boxplot(width = 0.1, outlier.shape = NA, fill = NA) +
+  labs(title = "Distance to TSS", y = "Distance to TSS (kb)", x = "Interaction class") +
+  scale_fill_manual(values = class_colors) +
+  theme_classic() +
+  theme(legend.position = "none")
+```
+
+This highlights the findings from above, showing that silencer-like elements tend to be further away
+from the target gene TSS (more likely indirect effects).
+
+### Chromatin landscape
+
+Next let's look at chromating marks of silencer-like elements vs. enhancer-like elements:
+```{r, fig.height=7, fig.width=7}
+# extract and reformat chromatin assays at enhancers for plots
+sig_distal_hits_chrom <- sig_distal_hits %>% 
+  select(pair_uid, int_class, `enh_signal_avg_DNase-seq`, enh_signal_avg_H3K27ac,
+         enh_signal_avg_H3K4me1, enh_signal_avg_H3K9me3, enh_signal_avg_H3K27me3,
+         enh_signal_avg_CTCF, tss_signal_avg_H3K4me3, `tss_signal_avg_DNase-seq`) %>% 
+  pivot_longer(cols = -c(pair_uid, int_class), values_to = "signal", names_to = "measurement") %>% 
+  mutate(measurement = sub("signal_avg_", "", measurement))
+
+# plot chromatin assay signal for enhancers vs silencers
+ggplot(sig_distal_hits_chrom, aes(x = int_class, y = signal, fill = int_class)) +
+  facet_wrap(~ measurement, scales = "free") +
+  geom_violin() +
+  geom_boxplot(width = 0.1, outlier.shape = NA, fill = NA) +
+  labs(x = "Interaction class", y = "FC over control", title = "Chromatin assays") +
+  scale_fill_manual(values = class_colors) +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank())
+```
+
+Only H3K27ac, a typical enhancer mark, seems decreased at silencer-like elements. While low H3K27ac
+has been observed at silencers, this by itself is not strong evidence that these are real silencers,
+since this could also be a sign that these simply false positives that aren't CREs at all.
+
+To separate these two possibilities, let's look at accessibility and H3K27ac jointly. Elements that
+are accessible but lack H3K27ac are plausible real silencers, while elements low in both assays are
+more likely not CREs at all.
+```{r fig.height=5, fig.width=7}
+# accessibility vs. active enhancer mark at each perturbed element
+enh_signal <- sig_distal_hits %>%
+  select(pair_uid, int_class, dnase = `enh_signal_avg_DNase-seq`,
+         h3k27ac = enh_signal_avg_H3K27ac, ctcf = enh_signal_avg_CTCF) %>%
+  drop_na(dnase, h3k27ac)
+
+# scatter plot of DNase-seq vs H3K27ac signal, colored by interaction class. A pseudocount of 1 is
+# added since some elements have no signal in either assay. The legend is dropped when assembling
+# the figure so that the main panel aligns with the marginal plots, and is added back at the end
+p_enh_signal <- ggplot(enh_signal, aes(x = h3k27ac + 1, y = dnase + 1, color = int_class)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "Accessibility vs. H3K27ac at perturbed elements",
+       x = "H3K27ac (FC over control + 1)", y = "DNase-seq (FC over control + 1)",
+       color = "Interaction class") +
+  scale_color_manual(values = class_colors) +
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+# axis_canvas() inherits the main panel's ranges in transformed (log10) space with an identity
+# transform, so marginal layers need to be passed pre-transformed values. Boxplots additionally
+# need a numeric class position, since the canvas y scale is continuous
+marg_data <- enh_signal %>%
+  mutate(log_h3k27ac = log10(h3k27ac + 1),
+         log_dnase = log10(dnase + 1),
+         class_pos = as.numeric(factor(int_class)))
+
+# build one density and one boxplot canvas for a given margin
+marginal_grobs <- function(plot, signal, axis) {
+  flip <- axis == "y"
+  dens <- axis_canvas(plot, axis = axis, coord_flip = flip) +
+    geom_density(data = marg_data, aes(x = .data[[signal]], color = int_class, fill = int_class),
+                 alpha = 0.4) +
+    scale_color_manual(values = class_colors) +
+    scale_fill_manual(values = class_colors)
+  box <- axis_canvas(plot, axis = axis, coord_flip = flip) +
+    geom_boxplot(data = marg_data,
+                 aes(x = .data[[signal]], y = class_pos, group = int_class, fill = int_class),
+                 orientation = "y", width = 0.6, linewidth = 0.3, outlier.size = 0.4) +
+    scale_fill_manual(values = class_colors)
+  if (flip) list(dens = dens + coord_flip(), box = box + coord_flip())
+  else list(dens = dens, box = box)
+}
+
+x_marg <- marginal_grobs(p_enh_signal, "log_h3k27ac", axis = "x")
+y_marg <- marginal_grobs(p_enh_signal, "log_dnase", axis = "y")
+
+# assemble figure, with densities next to the main panel and boxplots outside of them
+p_marg <- p_enh_signal + theme(legend.position = "none")
+p_marg <- insert_xaxis_grob(p_marg, x_marg$dens, unit(0.2, "null"), position = "top")
+p_marg <- insert_xaxis_grob(p_marg, x_marg$box, unit(0.12, "null"), position = "top")
+p_marg <- insert_yaxis_grob(p_marg, y_marg$dens, unit(0.2, "null"), position = "right")
+p_marg <- insert_yaxis_grob(p_marg, y_marg$box, unit(0.12, "null"), position = "right")
+
+# add the legend back next to the assembled figure
+plot_grid(ggdraw(p_marg), get_legend(p_enh_signal), nrow = 1, rel_widths = c(1, 0.25))
+```
+
+The marginal distributions show that silencer-like elements are shifted towards lower H3K27ac,
+while their accessibility distribution largely overlaps with that of enhancer-like elements. Most
+silencer-like elements are therefore accessible but depleted of H3K27ac, rather than being
+inaccessible regions that are unlikely to be CREs at all.
+
+A simpler way to look at the same relationship is to collapse both assays into one statistic per
+pair, the H3K27ac to DNase-seq ratio. If silencer-like elements are accessible but depleted of
+H3K27ac, they should have a lower ratio than enhancer-like elements.
+```{r fig.height=5, fig.width=4}
+# collapse the two assays into one statistic per pair. The same pseudocount of 1 as above is used,
+# which also avoids dividing by zero for elements without DNase-seq signal
+enh_signal <- mutate(enh_signal, h3k27ac_dnase_ratio = (h3k27ac + 1) / (dnase + 1))
+
+# test whether silencer-like pairs have a lower ratio than enhancer-like pairs
+ratio_test <- wilcox.test(h3k27ac_dnase_ratio ~ int_class, data = enh_signal)
+
+# plot ratio per interaction class
+ggplot(enh_signal, aes(x = int_class, y = h3k27ac_dnase_ratio, fill = int_class)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, size = 0.8, alpha = 0.5) +
+  labs(title = "H3K27ac / DNase-seq ratio",
+       subtitle = paste("Wilcoxon p =", format.pval(ratio_test$p.value, digits = 2)),
+       x = "Interaction class", y = "H3K27ac / DNase-seq (FC over control + 1)") +
+  scale_fill_manual(values = class_colors) +
+  scale_y_log10() +
+  theme_classic() +
+  theme(legend.position = "none")
+```
+
+Silencer-like pairs indeed have a roughly two-fold lower H3K27ac/DNase-seq ratio than
+enhancer-like pairs (medians of
+`r round(median(filter(enh_signal, int_class == "silencer")$h3k27ac_dnase_ratio), digits = 2)` vs.
+`r round(median(filter(enh_signal, int_class == "enhancer")$h3k27ac_dnase_ratio), digits = 2)`).
+This is in the direction expected for real silencers, which should be accessible but relatively
+depleted of H3K27ac, rather than for false positives that aren't CREs at all. Note however that
+this rests on only `r sum(enh_signal$int_class == "silencer")` silencer-like pairs, so this should
+be treated as suggestive rather than conclusive.
+
+Since CRISPRi doesn't distinguish between enhancers and other cis-regulatory elements, it's
+possible, that some of these elements that look like silencers are CTCF sites, which can impact gene
+regulation, but through other mechanisms (3D architecture).Let's compare at CTCF signal at enhancer-
+and silencer-like elements compared to DNase accessibility and H3K27ac signal.
+```{r fig.height=4, fig.width=9}
+# scatter plot of one assay against CTCF signal at the perturbed elements
+ctcf_scatter <- function(signal, label) {
+  ggplot(enh_signal, aes(x = ctcf + 1, y = .data[[signal]] + 1, color = int_class)) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm",se = FALSE, color = "black") +
+    labs(title = paste(label, "vs. CTCF"), x = "CTCF (FC over control + 1)",
+         y = paste0(label, " (FC over control + 1)"), color = "Interaction class") +
+    scale_color_manual(values = class_colors) +
+    scale_x_log10() +
+    scale_y_log10() +
+    theme_classic()
+}
+
+p_ctcf_dnase <- ctcf_scatter("dnase", "DNase-seq")
+p_ctcf_h3k27ac <- ctcf_scatter("h3k27ac", "H3K27ac")
+
+# arrange into one figure with a shared legend
+plot_grid(p_ctcf_dnase + theme(legend.position = "none"),
+          p_ctcf_h3k27ac + theme(legend.position = "none"),
+          get_legend(p_ctcf_dnase), nrow = 1, rel_widths = c(1, 1, 0.4))
+```
+
+CTCF signal seems slightly positively correlated with DNase accessibility and vaguely negatively
+correlated with H3K27ac. This is in line with the idea that DNase + H3K27ac marks enhancers, while
+DNase + CTCF (+ low H3K27ac) represents CTCF sites that do not act as enhancers.
+```{r fig.height=5, fig.width=7}
+# add CTCF ratios, using the same pseudocount as above
+enh_signal <- enh_signal %>%
+  mutate(ctcf_dnase_ratio = (ctcf + 1) / (dnase + 1),
+         ctcf_h3k27ac_ratio = (ctcf + 1) / (h3k27ac + 1))
+
+# boxplot of one ratio per interaction class, testing the two classes against each other
+ratio_boxplot <- function(ratio, label) {
+  ratio_test <- wilcox.test(reformulate("int_class", ratio), data = enh_signal)
+  ggplot(enh_signal, aes(x = int_class, y = .data[[ratio]], fill = int_class)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(width = 0.15, size = 0.8, alpha = 0.5) +
+    labs(title = label, subtitle = paste("Wilcoxon p =", format.pval(ratio_test$p.value, digits = 2)),
+         x = "Interaction class", y = paste(label, "(FC over control + 1)")) +
+    scale_fill_manual(values = class_colors) +
+    scale_y_log10() +
+    theme_classic() +
+    theme(legend.position = "none")
+}
+
+# arrange both ratios into one figure
+plot_grid(ratio_boxplot("ctcf_dnase_ratio", "CTCF / DNase-seq"),
+          ratio_boxplot("ctcf_h3k27ac_ratio", "CTCF / H3K27ac"), nrow = 1)
+```
+Indeed, silencer-like elements have a higher CTCF/H3K27ac ratio as expected if these elements would
+be enriched for CTCF sites
+(Wilcoxon p = `r format.pval(wilcox.test(ctcf ~ int_class, data = enh_signal)$p.value, digits = 2)`).
+But as before, this data is noisy and on based on a small number of silencer-like elements.
+
+To get a more qualitative view, let's overlap elements with CTCF peaks from the same experiment and
+see if silencer-like elements more often contain CTCF sites than enhancer-like elements.
+```{r fig.height=5, fig.width=4}
+# ENCODE CTCF peaks bed file
+ctcf_peaks_file <- "https://www.encodeproject.org/files/ENCFF951RPD/@@download/ENCFF951RPD.bed.gz"
+
+# load CTCF peaks
+ctcf_peaks <- import(ctcf_peaks_file, format = "narrowPeak")
+
+# get coordinates of the perturbed element of each pair
+elements_gr <- sig_distal_hits %>%
+  select(pair_uid, int_class, chr = pert_chr, start = pert_start, end = pert_end) %>%
+  makeGRangesFromDataFrame(keep.extra.columns = TRUE, starts.in.df.are.0based = TRUE)
+
+# record for each pair whether its element contains a CTCF peak
+elements_ctcf <- sig_distal_hits %>%
+  select(pair_uid, int_class) %>%
+  mutate(ctcf_peak = overlapsAny(elements_gr, ctcf_peaks))
+
+# test whether silencer-like elements more often contain a CTCF peak
+ctcf_peak_test <- fisher.test(table(elements_ctcf$int_class, elements_ctcf$ctcf_peak))
+
+# calculate proportion of elements overlapping a CTCF peak per interaction class
+prop_ctcf_peak <- elements_ctcf %>%
+  group_by(int_class) %>%
+  summarize(n = n(), n_ctcf = sum(ctcf_peak), prop = n_ctcf / n)
+
+# plot proportion of elements overlapping a CTCF peak
+ggplot(prop_ctcf_peak, aes(x = int_class, y = prop, fill = int_class)) +
+  geom_col() +
+  geom_text(aes(label = paste0(n_ctcf, "/", n)), vjust = -0.5, size = 3) +
+  labs(title = "Elements overlapping a CTCF peak",
+       subtitle = paste("Fisher's exact p =",
+                        format.pval(ctcf_peak_test$p.value, digits = 2)),
+       x = "Interaction class", y = "Proportion of elements with CTCF peak") +
+  scale_fill_manual(values = class_colors) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.05), expand = expansion(mult = c(0, 0.1)),
+                     limits = c(0, 0.35)) +
+  theme_classic() +
+  theme(legend.position = "none")
+```
+
+`r round(filter(prop_ctcf_peak, int_class == "silencer")$prop * 100, digits = 1)`% of silencer-like
+elements contain a CTCF peak, compared to
+`r round(filter(prop_ctcf_peak, int_class == "enhancer")$prop * 100, digits = 1)`% of enhancer-like
+elements (odds ratio `r round(ctcf_peak_test$estimate, digits = 2)`). This goes in the same
+direction as the signal-based ratios above, but the enrichment is not significant and the
+confidence interval is wide
+(`r paste(round(ctcf_peak_test$conf.int, digits = 2), collapse = "-")`), which is expected with
+only `r filter(prop_ctcf_peak, int_class == "silencer")$n` silencer-like pairs. So this is
+consistent with a subset of silencer-like elements being CTCF sites rather than technical false
+positives, but the current data are too underpowered to establish it.
+
+### Target and nearest gene expression levels
+Next, we compare TPM level of the target genes between silencer- and enhancer-like interactions.
+```{r fig.height=5, fig.width=5}
+ggplot(sig_distal_hits, aes(x = int_class, y = gene_tpm, fill = int_class)) +
+  geom_violin() +
+  geom_boxplot(width = 0.1, outlier.shape = NA, fill = NA) +
+  labs(x = "Interaction class", y = "TPM", title = "Target gene TPM") +
+  theme_classic() +
+  scale_fill_manual(values = class_colors) +
+  scale_y_log10() +
+  theme_classic() +
+  theme(legend.position = "none")
+```
+
+Target genes of silencer-like interaction aren't lower than these of enhancer-like interactions.
+This can have many reasons, including statistical power to detect significant effects, but doesn't
+point to silencer effects. Although genes can have a mix of regulatory elements and even highly
+expressed genes might have silencing distal regulatory inputs (see super enhancers, which contain
+both silencing and activating TF motifs).
+
+Lastly, let's compare expression levels of nearest genes between silencer and enhancer-like
+interactions.
+
+```{r}
+# load TPM quantifications for all genes
+tpm <- fread(snakemake@input$gene_tpm)
+
+# load genome annotations and extract all gene bodies
+annot <- import(snakemake@input$annot, format = "gtf")
+genes <- annot[annot$type == "gene"]
+
+# only retain annotations of genes also in TPM table, i.e. that were in DGE data
+genes$gene_id <- sub("\\..+", "", genes$gene_id)  # strip version from Ensembl gene id 
+genes <- genes[genes$gene_id %in% tpm$gene_id]
+
+# add TPM values to gene annotations
+mcols(genes) <- merge(mcols(genes), select(tpm, gene_id, tpm), by = "gene_id")
+
+# infer TSS coordinates
+tss <- promoters(genes, upstream = 0, downstream = 1)
+
+# get all unique significant elements
+cres <- sig_distal_hits %>% 
+  select(grna_target, chr = pert_chr, start = pert_start, end = pert_end, elem_class) %>% 
+  distinct()
+
+# make genomic ranges object
+cres_gr <- makeGRangesFromDataFrame(cres, keep.extra.columns = TRUE, starts.in.df.are.0based = TRUE)
+
+# find closest gene and TSS for each CRE
+nearest_genes <- nearest(cres_gr, genes)
+nearest_tss <- nearest(cres_gr, tss)
+
+# add TPM of nearest genes and TSSs to CREs table
+cres <- cres %>% 
+  mutate(tpm_nearest_gene = genes[nearest_genes]$tpm) %>% 
+  mutate(tpm_nearest_tss = tss[nearest_tss]$tpm)
+
+# convert to long format for plots
+cres <- cres %>% 
+  pivot_longer(cols = c("tpm_nearest_gene", "tpm_nearest_tss"), names_to = "measurement",
+               values_to = "tpm")
+```
+
+```{r}
+# plot nearest gene or TSS TPM values
+ggplot(cres, aes(x = elem_class, y = tpm, fill = elem_class)) +
+  facet_wrap(~ measurement, scales = "free") +
+  geom_violin() +
+  geom_boxplot(width = 0.1, outlier.shape = NA, fill = NA) +
+  labs(x = "Interaction class", y = "TPM", title = "Nearest gene TPM") +
+  scale_fill_manual(values = class_colors) +
+  scale_y_log10() +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank())
+```
+
+Again, no clear difference here.
+
+***
+
+## Session information
+This document was produced using following packages:
+```{r sessionInfo}
+sessionInfo()
+```

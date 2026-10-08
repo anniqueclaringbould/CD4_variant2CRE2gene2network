@@ -16,6 +16,7 @@ chromatin_assays:
   H3K4me3: ENCFF546IYU
   H3K9me3: ENCFF169XPR
   H3K27me3: ENCFF921HWX
+  CTCF: ENCFF523IEI
 
 # need to download hic file from ENCODE portal: https://www.encodeproject.org/files/ENCFF355VJW/@@download/ENCFF355VJW.hic 
 hic: 
