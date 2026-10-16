@@ -51,7 +51,7 @@ for n_factors in [5, 10, 15, 20, 25, 30]:
             mdata,
             mfl.ModelOptions(n_factors=n_factors, weight_prior = "Horseshoe", factor_prior = "Horseshoe", likelihoods="Normal"),
             mfl.TrainingOptions(device = "cuda", seed=42 + run, 
-                                save_path='models/mofa_lr_n' + str(n_factors) + "_" + str(run), lr=0.005, 
-                                early_stopper_patience=1000, max_epochs = 20000), 
+                                save_path='models/mofa_lr05_30k_n' + str(n_factors) + "_" + str(run), lr=0.05, 
+                                early_stopper_patience=5000, max_epochs = 30000), 
         )
 
