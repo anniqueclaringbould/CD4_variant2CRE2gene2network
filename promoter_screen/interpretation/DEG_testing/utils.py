@@ -67,23 +67,6 @@ def load_deg_results(file_path, pval_threshold = None):
     return df1
 
 
-def median_of_ratios(counts: np.ndarray):
-    """
-    DESeq2 Median of Ratios normalization (pure NumPy).
-    counts: genes x samples
-    """
-    mask_nonzero = counts > 0
-    geom_means = np.exp(
-        np.sum(np.log(counts, where=mask_nonzero), axis=1) /
-        np.maximum(mask_nonzero.sum(axis=1), 1)
-    )
-    geom_means[geom_means == 0] = np.nan
-    ratios = counts / geom_means[:, np.newaxis]
-    size_factors = np.nanmedian(ratios, axis=0)
-    norm_counts = counts / size_factors[np.newaxis, :]
-    return size_factors, norm_counts
-
-
 def get_efficiancy(adata, target_column = "perturbed_gene_name", no_target_key = "NTC"):
     all_targets = adata.var_names[adata.var_names.isin(adata.obs[target_column].unique())]
     results = {}

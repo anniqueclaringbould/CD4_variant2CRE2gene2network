@@ -40,6 +40,10 @@ plt.rcParams.update({
 
 INPUT_DIR = OUTPUT_DIR = Path("/g/stegle/schrod/code/TCell/Figure_S9")
 
+# Variable gene set — small, version-controlled next to the script (generated in
+# the preprocessing notebook 01_01 as the var axis of the Perturb-seq AnnData).
+GENE_SET = Path(__file__).resolve().parent / "input" / "gene_set.csv"
+
 # ── Parameters ──
 TOP_N     = 20
 TOP_N_VIZ = 10
@@ -71,7 +75,7 @@ def load_data():
 
     # Variable genes
     var_gene_set = set(
-        pd.read_csv(INPUT_DIR / "gene_set.csv")["bpcells_name"].unique()
+        pd.read_csv(GENE_SET)["bpcells_name"].unique()
     )
 
     # TAP-seq from Table S5
