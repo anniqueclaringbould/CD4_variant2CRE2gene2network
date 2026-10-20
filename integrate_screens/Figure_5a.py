@@ -14,11 +14,12 @@ Edges drawn as straight lines via LineCollection:
   Green gene -> hop 1 gene  (Perturb-seq)
   Gold  hop 1 -> hop 2 gene (Perturb-seq)
 
-Input files (in input/):
-  gene_set.csv                                — variably expressed genes
-  cre_perturbation_screen_results_traits.csv  — TAP-seq CRE perturbation screen
-  perturbseq_hits_nolfc.csv                   — Perturb-seq DESeq2 results
-  ncbiRefSeq_cache.txt.gz                     — UCSC RefSeq hg38 coordinates
+Input files:
+  gene_set.csv             — variably expressed genes (var axis of the Perturb-seq AnnData)
+  Table S5.xlsx            — TAP-seq CRE perturbation screen (sheet cre_perturbation_screen_results)
+  Table S3.xlsx            — peak -> GWAS disease trait (reconstructs the per-CRE 'trait' column)
+  Table S12.xlsx           — genome-wide Perturb-seq DESeq2 results
+  ncbiRefSeq_cache.txt.gz  — UCSC RefSeq hg38 coordinates (auto-downloaded if absent)
 
 Output (in output/):
   figure_5A_network.pdf / .svg / .png
@@ -26,6 +27,8 @@ Output (in output/):
 
 import re
 import gzip
+import datetime
+import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +44,32 @@ from matplotlib.gridspec import GridSpec
 SCRIPT_DIR = Path(__file__).resolve().parent
 INPUT_DIR  = Path("/g/stegle/schrod/code/TCell/Figure_5_input")
 OUTPUT_DIR = Path("/g/stegle/schrod/code/TCell/Figure_5_output")
+
+# Variable gene set — small, version-controlled next to the script (generated in
+# the preprocessing notebook 01_01 as the var axis of the Perturb-seq AnnData).
+GENE_SET = SCRIPT_DIR / "input" / "gene_set.csv"
+
+TABLE_S5  = Path("/g/stegle/schrod/code/TCell/Figure_S9/Table S5.xlsx")       # CRE screen
+TABLE_S3  = Path("/g/stegle/schrod/code/TCell_explorer/data/Table_S3.xlsx")   # peak -> disease trait
+TABLE_S12 = Path("/g/stegle/schrod/code/TCell/Table S12.xlsx")               # Perturb-seq DEGs
+
+# UCSC hg38 RefSeq annotation — a public reference used only as a gene-coordinate
+# fallback. Downloaded to the cache path on first run if not already present.
+REFSEQ_URL   = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/ncbiRefSeq.txt.gz"
+REFSEQ_CACHE = INPUT_DIR / "ncbiRefSeq_cache.txt.gz"
+
+
+def ensure_refseq(path: Path = REFSEQ_CACHE, url: str = REFSEQ_URL) -> Path:
+    """Return the RefSeq cache, downloading it from UCSC if it is not present."""
+    if path.exists():
+        return path
+    print(f"RefSeq cache not found — downloading from UCSC:\n  {url}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".part")
+    urllib.request.urlretrieve(url, tmp)
+    tmp.replace(path)
+    print(f"  saved {path} ({path.stat().st_size / 1e6:.1f} MB)")
+    return path
 
 # ── Filtering thresholds ─────────────────────────────────────────────────────
 TOP_N       = 100000           # max Perturb-seq targets per source gene
@@ -73,17 +102,37 @@ plt.rcParams.update({
 
 print("Loading variable gene list...")
 var_genes = sorted(
-    pd.read_csv(INPUT_DIR / "gene_set.csv")["bpcells_name"].unique()
+    pd.read_csv(GENE_SET)["bpcells_name"].unique()
 )
 var_gene_set = set(var_genes)
 n_var = len(var_genes)
 print(f"  {n_var} variable genes")
 
 # ── TAP-seq ──────────────────────────────────────────────────────────────────
-print("Loading TAP-seq data...")
-tapseq = pd.read_csv(
-    INPUT_DIR / "cre_perturbation_screen_results_traits.csv", low_memory=False
+print("Loading TAP-seq data (Table S5)...")
+tapseq = pd.read_excel(TABLE_S5, sheet_name="cre_perturbation_screen_results")
+
+# Excel stores the MARCH/SEPT/DEC gene families as dates in the .xlsx, so openpyxl
+# reads those response_id cells back as datetimes. Restore the symbols (month ->
+# family + day); this reproduces the source table's response_id column exactly.
+_MONTH_GENE = {3: "MARCH", 9: "SEPT", 12: "DEC"}
+def _fix_date_gene(x):
+    if isinstance(x, (datetime.datetime, pd.Timestamp)):
+        return f"{_MONTH_GENE.get(x.month, x.strftime('%b').upper())}{x.day}"
+    return x
+tapseq["response_id"] = tapseq["response_id"].map(_fix_date_gene)
+
+# Table S5 carries the screen but not the per-CRE disease `trait`. Reconstruct it
+# from Table S3 (peak -> SNP_trait): the sorted set of traits per peak reproduces
+# the original `trait` column exactly (135/135 enhancer-like CREs), and S3 already
+# encodes the non-GWAS labels (eQTL, GRN, Nila_validation) as trait values.
+s3 = pd.read_excel(TABLE_S3, sheet_name="prioritised_gene_list")
+cre_trait = (
+    s3.dropna(subset=["SNP_trait"])
+      .groupby("peak")["SNP_trait"]
+      .apply(lambda s: ",".join(sorted(set(s.astype(str)))))
 )
+tapseq["trait"] = tapseq["grna_target"].map(cre_trait)
 
 enh = tapseq[
     (tapseq["enhancer_like_interaction"] == True)
@@ -98,7 +147,7 @@ all_tested_genes = sorted(gene_panel, key=lambda g: (gene_panel[g], g))
 enh_target_genes = set(enh["response_id"].unique())
 print(f"  Tested genes: {len(all_tested_genes)}, with enhancer hits: {len(enh_target_genes)}")
 
-ps = pd.read_excel("/g/stegle/schrod/code/TCell/Table S12.xlsx")
+ps = pd.read_excel(TABLE_S12)
 ps.rename(columns={"KO": "contrast", "gene_name": "variable", "adj_pval": "adj_p_value", "LFC": "log_fc"}, inplace=True)
 ps = ps[ps["contrast"] != ps["variable"]]                          # no self
 ps = ps[ps["log_fc"].abs() >= LFC_CUTOFF]                          # LFC gate
@@ -177,7 +226,7 @@ for _, r in tapseq.drop_duplicates("response_id").iterrows():
 
 # 4b. RefSeq fallback
 print("  Loading RefSeq cache...")
-with gzip.open(INPUT_DIR / "ncbiRefSeq_cache.txt.gz", "rt") as f:
+with gzip.open(ensure_refseq(), "rt") as f:
     refseq_data = f.read()
 
 refseq = {}
