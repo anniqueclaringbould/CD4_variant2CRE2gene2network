@@ -32,3 +32,10 @@ echo "Completed chunk ${SLURM_ARRAY_TASK_ID}"
 
 # With ribosomal percentage correction:
 # sbatch 03_01_submit_deseq2_chunks.sh --chunk-size 50 --output-dir /g/stegle/schrod/code/TCell/pseudobulk_deseq2_chunks50_min3bulks_ribosomal --min-bulks 3 --ribosomal
+
+  sbatch --array=0-29 \
+    --output=$OUT/slurm_logs/cellscores_%a_%A.out \
+    --error=$OUT/slurm_logs/cellscores_%a_%A.err \
+    /g/stegle/schrod/code/CD4_variant2CRE2gene2network/promoter_screen/interpretation/DEG_testing/03_01_submit_deseq2_chunks_subsampled.sh \
+    --cell-scores --chunk-size 50 --min-bulks 3 --ribosomal \
+    --output-dir $OUT/pseudobulk_deseq2_cellscores

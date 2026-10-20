@@ -22,6 +22,40 @@ from utils import *
 
 logger = get_logger(__name__)
 
+# per-pseudobulk cell state AUC scores, written by 01_03_add_cell_scores_to_pseudobulks.py
+CELL_SCORE_FILE = "/g/stegle/schrod/data/T_Cell/pseudobulk_cell_scores.tsv"
+
+
+def subsample_cells(bulks, keep_frac, seed):
+    """Randomly remove a fraction of the cells from every pseudobulk.
+
+    Cell identity is gone once counts are summed, so the removal is approximated by binomial thinning
+    of the counts together with the matching reduction of n_cells. That reproduces the loss of library
+    size and of the log10_n_cells covariate, but slightly understates the extra between-replicate
+    variance that removing whole cells would cause. The ribosomal fraction is left as is, since
+    thinning does not bias it.
+    """
+    if keep_frac >= 1.0:
+        return bulks
+    rng = np.random.default_rng(seed)
+    n_before = int(bulks.obs['n_cells'].sum())
+
+    X = bulks.X
+    if sp.issparse(X):
+        X = X.tocsr().copy()
+        X.data = rng.binomial(X.data.astype(np.int64), keep_frac).astype(X.dtype)
+        X.eliminate_zeros()
+    else:
+        X = rng.binomial(np.asarray(X).astype(np.int64), keep_frac).astype(bulks.X.dtype)
+    bulks.X = X
+    bulks.obs['n_cells'] = rng.binomial(bulks.obs['n_cells'].values.astype(np.int64), keep_frac)
+
+    n_after = int(bulks.obs['n_cells'].sum())
+    logger.info(f"Randomly removed {100 * (1 - keep_frac):.0f}% of cells (seed {seed}): "
+                f"{n_before:,} -> {n_after:,} cells across pseudobulks")
+    return bulks
+
+
 @click.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.option('--chunk-start', type=int, required=True, help='Starting chunk index (0-based)')
 @click.option('--chunk-end', type=int, default=None, help='Ending chunk index (exclusive). If not provided, processes only chunk-start')
@@ -33,7 +67,11 @@ logger = get_logger(__name__)
 @click.option('--output-dir', type=str, default="/g/stegle/schrod/code/TCell/pseudobulk_deseq2_chunks2", help='Output directory for results')
 @click.option('--h5ad-file', type=str, default="/g/stegle/schrod/data/T_Cell/DESeq2_donor_guide_bulks.h5ad", help='Path to input h5ad file')
 @click.option('--ribosomal', is_flag=True, help='Correct for ribosomal percentage in design formula')
-def main(chunk_start, chunk_end, chunk_size, min_cells_per_bulk, min_bulks, n_cpus_fit, n_cpus_test, output_dir, h5ad_file, ribosomal):
+@click.option('--exclude-donor', type=str, default=None, help='Leave one donor out, i.e. run the analysis on all donors except this one (e.g. A)')
+@click.option('--keep-frac', type=float, default=1.0, help='Randomly keep this fraction of cells in every pseudobulk (e.g. 0.9, 0.75, 0.5), to test whether random cell loss costs as much power as dropping a donor')
+@click.option('--seed', type=int, default=0, help='Seed for the random cell subsample')
+@click.option('--cell-scores', is_flag=True, help='Add the per-pseudobulk cell state AUC scores (CellCycle_G2M, early, ICOS_CD38, Mito, CTLA4_CD38, Poor_Quality, iTreg_5d4h, Th1_5d) to the design formula')
+def main(chunk_start, chunk_end, chunk_size, min_cells_per_bulk, min_bulks, n_cpus_fit, n_cpus_test, output_dir, h5ad_file, ribosomal, exclude_donor, keep_frac, seed, cell_scores):
     """
     Run DESeq2 differential expression analysis on specified chunk(s) of targets.
     
@@ -61,6 +99,36 @@ def main(chunk_start, chunk_end, chunk_size, min_cells_per_bulk, min_bulks, n_cp
     logger.info(f"Read Bulked anndata object from: {h5ad_file}")
     bulks = ad.read_h5ad(os.path.join(h5ad_file))
     logger.info(f"Anndata object with {bulks.n_obs} cells and {bulks.n_vars} genes loaded.")
+
+    # %%
+    #optionally add the cell state scores, joined by pseudobulk id and appended to the design formula
+    cov_terms = []
+    if cell_scores:
+        cov = pd.read_csv(CELL_SCORE_FILE, sep='\t', index_col=0)
+        cov_terms = [c for c in cov.columns if c != 'n_cells_scored']
+        bulks.obs = bulks.obs.join(cov[cov_terms])
+        n_na = int(bulks.obs[cov_terms].isna().any(axis=1).sum())
+        if n_na:
+            logger.error(f"{n_na} pseudobulks have no cell scores, they would break the fit")
+            sys.exit(1)
+        logger.info(f"Added {len(cov_terms)} cell state scores to the design: {', '.join(cov_terms)}")
+
+    # %%
+    #leave one donor out, before all other filters so that they apply to the remaining donors
+    if exclude_donor is not None:
+        logger.info(f"Leaving out donor {exclude_donor}...")
+        n_before = bulks.n_obs
+        bulks = bulks[bulks.obs.donor != exclude_donor].copy()
+        # drop the now unused donor category, it would make the design matrix rank deficient
+        bulks.obs["donor"] = bulks.obs["donor"].astype(str)
+        logger.info(f"Removed {n_before - bulks.n_obs} pseudobulks. {bulks.n_obs} remaining.")
+
+    # %%
+    #randomly remove a fraction of the cells, before the min_cells filter so that pseudobulks that
+    #fall below the threshold are dropped just as they would be with fewer cells
+    if keep_frac < 1.0:
+        logger.info(f"Randomly keeping {100 * keep_frac:.0f}% of cells in every pseudobulk (seed {seed})...")
+        bulks = subsample_cells(bulks, keep_frac, seed)
 
     # %%
     #remove small bulks
@@ -119,10 +187,12 @@ def main(chunk_start, chunk_end, chunk_size, min_cells_per_bulk, min_bulks, n_cp
         # Fit model
         logger.info(f"  Fitting DESeq2 model with {chunk_bulks.n_obs} pseudobulks and {chunk_bulks.n_vars} genes...")
         
+        extra = "".join(f" + {c}" for c in cov_terms)
+
         if ribosomal:
-            model = PyDESeq2(chunk_bulks, design='~ log10_n_cells + donor + target + ribosomal')
+            model = PyDESeq2(chunk_bulks, design=f'~ log10_n_cells + donor + target + ribosomal{extra}')
         else:
-            model = PyDESeq2(chunk_bulks, design='~ log10_n_cells + donor + target')
+            model = PyDESeq2(chunk_bulks, design=f'~ log10_n_cells + donor + target{extra}')
         
         model.fit(n_cpus=n_cpus_fit)
         
