@@ -5,6 +5,7 @@ configfile: "config/config.yml"
 include: "rules/chromatin_assays.smk"
 include: "rules/chromatin_analyses.smk"
 include: "rules/miscellaneous_analyses.smk"
+include: "rules/alternative_filters.smk"
 
 # perform all analyses
 rule all:
@@ -14,6 +15,8 @@ rule all:
     "results/genome_browser_tracks/results_with_promoterC_significant_cis_crispr_etps.bedpe",
     "results/genome_browser_tracks/results_with_promoterC_nonSignificant_cis_crispr_etps.bedpe",
     "results/chromatin_features_etp_classes.html",
+    "results/enhancer_vs_silencer_analysis.html",
+    "results/plots/alternative_cre_screen_filters.pdf"
     "results/plots/prioritization_volcano_plot.pdf",
     "results/plots/tapseq_panel_summary_plots.pdf",
     "results/plots/cre_screen_sceptre_qq_plots_tail_4by4.pdf",

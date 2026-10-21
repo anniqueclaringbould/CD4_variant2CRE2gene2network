@@ -1,0 +1,64 @@
+# parameters for alternative CRE-gene pair filtering scenarios
+# promoter_window: upstream and downstream bp around each annotated TSS defining promoters
+# enhancer_like_classes: interaction classes that can be called enhancer-like (intergenic-distal is
+#   always included). Can be any of intergenic-distal, intragenic-distal, promoter-distal and
+#   intragenic-proximal (effects on host genes, which could be caused by dCas9-KRAB blocking
+#   transcription)
+# proximal_rescue: when promoter- or intragenic-distal pairs are enhancer-like:
+#   significant: element has no significant proximal hit (published)
+#   tested: proximal gene was tested and not significant
+#   none: no condition on the proximal gene
+# filter_cres: filter for intergenic-distal, promoter-proximal and enhancer-like pairs and use
+#   intergenic-distal non-significant elements as background (published). If false, all pairs
+#   are retained and the background can include elements of any class
+alternative_filters:
+  published:
+    promoter_window: [1500, 1500]
+    enhancer_like_classes: ["intergenic-distal", "intragenic-distal", "promoter-distal"]
+    proximal_rescue: "significant"
+    filter_cres: True
+  promwin_500:
+    promoter_window: [500, 500]
+    enhancer_like_classes: ["intergenic-distal", "intragenic-distal", "promoter-distal"]
+    proximal_rescue: "significant"
+    filter_cres: True
+  promwin_5000:
+    promoter_window: [5000, 5000]
+    enhancer_like_classes: ["intergenic-distal", "intragenic-distal", "promoter-distal"]
+    proximal_rescue: "significant"
+    filter_cres: True
+  drop_promoter_distal:
+    promoter_window: [1500, 1500]
+    enhancer_like_classes: ["intergenic-distal", "intragenic-distal"]
+    proximal_rescue: "significant"
+    filter_cres: True
+  drop_intragenic_distal:
+    promoter_window: [1500, 1500]
+    enhancer_like_classes: ["intergenic-distal", "promoter-distal"]
+    proximal_rescue: "significant"
+    filter_cres: True
+  intergenic_only:
+    promoter_window: [1500, 1500]
+    enhancer_like_classes: ["intergenic-distal"]
+    proximal_rescue: "significant"
+    filter_cres: True
+  all_intragenic:
+    promoter_window: [1500, 1500]
+    enhancer_like_classes: ["intergenic-distal", "intragenic-proximal", "intragenic-distal"]
+    proximal_rescue: "none"
+    filter_cres: True
+  rescue_tested:
+    promoter_window: [1500, 1500]
+    enhancer_like_classes: ["intergenic-distal", "intragenic-distal", "promoter-distal"]
+    proximal_rescue: "tested"
+    filter_cres: True
+  rescue_none:
+    promoter_window: [1500, 1500]
+    enhancer_like_classes: ["intergenic-distal", "intragenic-distal", "promoter-distal"]
+    proximal_rescue: "none"
+    filter_cres: True
+  no_filter_matched_bg:
+    promoter_window: [1500, 1500]
+    enhancer_like_classes: ["intergenic-distal", "intragenic-distal", "promoter-distal"]
+    proximal_rescue: "significant"
+    filter_cres: False

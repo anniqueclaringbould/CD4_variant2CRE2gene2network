@@ -233,30 +233,35 @@ enh_etp <- etp %>%
 plot_features <- c("log_2_fold_change", "enh_signal_count_DNase-seq", "enh_signal_avg_H3K27ac",
                    "enh_signal_avg_H3K4me1", "enh_signal_avg_H3K4me3")
 
-# select any elements that were detected as positives and categorize by distance
+# select any pairs that were detected as positives and categorize by distance
 all_bins <- c("hit TSS", "hit 1500-10k", "hit 10k-100k", "hit 100k-1Mb", "hit >1Mb", "NS")
 positives <- enh_etp %>% 
   filter(significant == TRUE) %>% 
   mutate(category = paste("hit", distToTSS_bin)) %>%
   mutate(category = factor(category, levels = all_bins, ordered = TRUE) )
 
-# select unique enhancers and features to plot
+# select columns and features to plot
 positives <- positives %>% 
-  select(grna_target, significant, category, all_of(plot_features)) %>% 
-  distinct()
+  select(grna_target, significant, category, dist_to_tss, all_of(plot_features))
 
-# if an enhancer is counted in multiple categories, assign it to the closest distance to TSS bin
+# if an enhancer has multiple positive hits, only pick the one closest to the TSS
 positives <- positives %>% 
   group_by(grna_target) %>% 
-  slice_min(category, n = 1)
+  slice_min(abs(dist_to_tss), n = 1, with_ties = FALSE) %>% 
+  select(-dist_to_tss)
 
-# filter for enhancers that are not linked to any gene and select columns for plot
+# filter for elements that are not linked to any gene and select columns for plot
 negatives <- enh_etp %>% 
   filter(significant == FALSE, !grna_target %in% positives$grna_target,
          interaction_type == "intergenic-distal") %>% 
   mutate(category = factor("NS", levels = all_bins, ordered = TRUE)) %>% 
-  select(grna_target, significant, category, all_of(plot_features)) %>% 
-  distinct()
+  select(grna_target, significant, category, dist_to_tss, all_of(plot_features))
+
+# if an element is in multiple negative pairs, only pick the one closest to the TSS
+negatives <- negatives %>% 
+  group_by(grna_target) %>% 
+  slice_min(abs(dist_to_tss), n = 1, with_ties = FALSE) %>% 
+  select(-dist_to_tss)
 
 # combine back into one table and convert to long format for plots
 plot_etp <- bind_rows(positives, negatives) %>% 
@@ -306,7 +311,6 @@ p1 <- ggplot(filter(plot_etp, assay == "Effect size"),
   geom_boxplot() +
   stat_pvalue_manual(data = filter(kw_tests, assay == "Effect size"), y.position = 2.25, size = 3,
                      label = "P adj. {p.adj.plot}", remove.bracket = TRUE, inherit.aes = FALSE) +
-  #labs(y = bquote(atop("CRISPRi effect size", "(log"[2] ~ "fold change)"))) +
   labs(y = expression("log"[2] ~ "fold change")) +
   scale_fill_manual(values = category_colors) +
   scale_y_continuous(limits = c(-4, 2.5)) +

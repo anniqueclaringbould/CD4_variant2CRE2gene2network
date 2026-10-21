@@ -36,6 +36,8 @@ rule count_chromatin_assay_bigwig:
     elements = "results/{elements}.bed",
   output: "results/chromatin_assays/{elements}.{file}.tsv"
   conda: "../envs/otar_cre_figures.yml"
+  resources:
+    mem_mb = 32000
   script:
     "../scripts/count_chromatin_assay_bigwig.R"
 
@@ -75,5 +77,7 @@ rule add_hic_interaction_frequency:
   params:
     hic_res = config["hic"]["resolution"]
   conda: "../envs/otar_cre_figures.yml"
+  resources:
+    mem_mb = 32000
   script:
     "../scripts/compute_hic_contacts.py"
