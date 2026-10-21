@@ -2,11 +2,11 @@
 # sceptre results from E-G mapping by differential expression analysis
 results:
   with_promoterC:
-    file: "/g/steinmetz/moonen/Rstudio/screen_analyses_DM_with_promoterC/results/results_df.csv"
+    file: "resources/results_df.csv"
     group_col: "panel"
 
 # genome annotations  
-genome: "/g/steinmetz/project/otar/forAndreas/hg38.gtf"
+genome: "resources/hg38.gtf"
 
 # ENCODE portal accessions for chromatin assay files
 chromatin_assays:
@@ -14,16 +14,18 @@ chromatin_assays:
   H3K27ac: ENCFF151LJA
   H3K4me1: ENCFF075XMI
   H3K4me3: ENCFF546IYU
+  H3K9me3: ENCFF169XPR
+  H3K27me3: ENCFF921HWX
 
 # need to download hic file from ENCODE portal: https://www.encodeproject.org/files/ENCFF355VJW/@@download/ENCFF355VJW.hic 
 hic: 
-  file: "/scratch/gschwind/hic_data/ENCFF355VJW.hic"
+  file: "/scratch/users/agschwin/otar/ENCFF355VJW.hic"
   resolution: 5000
 
 # other CRE and gene-level features
-eRNA_counts: "/g/steinmetz/calfonso/projects/collabs/dewi/results_df_annotated_241013.eRNA.annotated.csv"
-gene_disease_info: "/g/steinmetz/project/otar/interpretation/drug_annotation/output/annotated_genes_dataframe.tsv"
+eRNA_counts: "resources/results_df_annotated_241013.eRNA.annotated.csv"
+gene_disease_info: "resources/annotated_genes_dataframe.tsv"
 
 # E-G pair prioritization for CRE screen and TAP-seq target gene panels
-eg_prioritization: "/g/steinmetz/project/otar_2063/enhancer_screen/design/gene_selection/prioritised_gene_list_100kb_up_downstream_eQTL_GRN_aim1_E2G_nonGWAS_extended_windows_2024-03-01.tsv"
-tapseq_gene_panels: "/g/steinmetz/project/otar_2063/enhancer_screen/design/gene_selection/Library_panels_2024-03-02.qs"
+eg_prioritization: "resources/prioritised_gene_list_100kb_up_downstream_eQTL_GRN_aim1_E2G_nonGWAS_extended_windows_2024-03-01.tsv"
+tapseq_gene_panels: "resources/Library_panels_2024-03-02.qs"

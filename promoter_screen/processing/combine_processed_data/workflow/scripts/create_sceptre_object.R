@@ -59,12 +59,9 @@ sceptre_object <- import_data_from_cellranger(
   directory_to_write = dirname(snakemake@output[[1]])
 )
 
-# TODO: FIX THIS
-# remove batch covariate if not in formula, since else sceptre doesn't work properly
-if (!grepl("batch", snakemake@params$formula)) {
-  sceptre_object@covariate_data_frame <- sceptre_object@covariate_data_frame[, -ncol(sceptre_object@covariate_data_frame)]
-  sceptre_object@covariate_names <- setdiff(sceptre_object@covariate_names, "batch")
-}
+# remove batch covariate since else sceptre doesn't work properly
+# sceptre_object@covariate_data_frame <- sceptre_object@covariate_data_frame[, -ncol(sceptre_object@covariate_data_frame)]
+# sceptre_object@covariate_names <- setdiff(sceptre_object@covariate_names, "batch")
 
 message("Setting analysis parameters...")
 
@@ -73,7 +70,6 @@ sceptre_object <- set_analysis_parameters(
   sceptre_object = sceptre_object,
   positive_control_pairs = pos_ctrl_pairs,
   side = snakemake@params$side,
-  formula_object = as.formula(snakemake@params$formula),
   resampling_mechanism = snakemake@params$resampling_mechanism
 )
 

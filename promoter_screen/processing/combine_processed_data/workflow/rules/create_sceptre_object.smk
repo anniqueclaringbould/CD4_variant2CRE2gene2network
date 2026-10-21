@@ -82,7 +82,6 @@ rule create_sceptre_object:
     moi = config["sceptre"]["moi"],
     side = config["sceptre"]["side"],
     resampling_mechanism = config["sceptre"]["resampling_mechanism"],
-    formula = config["sceptre"]["formula"],
     on_disc = True
   conda: "sceptre"
   resources:
@@ -112,7 +111,6 @@ rule create_sceptre_object_donor:
     moi = config["sceptre"]["moi"],
     side = config["sceptre"]["side"],
     resampling_mechanism = config["sceptre"]["resampling_mechanism"],
-    formula = config["sceptre"]["formula"],
     on_disc = True
   conda: "sceptre"
   resources:

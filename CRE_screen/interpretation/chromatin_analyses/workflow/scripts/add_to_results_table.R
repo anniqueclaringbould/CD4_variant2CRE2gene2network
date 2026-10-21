@@ -1,8 +1,5 @@
 ## add additional information to results table
 
-# save.image("RDA/add_to_results_table.rda")
-# stop()
-
 # required packages
 suppressPackageStartupMessages({
   library(readr)
@@ -47,8 +44,15 @@ compute_distance <- function(etp, feature = c("tss", "gene"),
   # compute distance between enhancers and provided TSS / gene annotations
   distance <- distance(eg_pairs)
   
+  # get pairs where cCRE is upstream of the TSS depending on strand of the gene
+  gene_strand <- as.vector(strand(second(eg_pairs)))
+  upstream_pairs <- case_when(
+    gene_strand == "+" & end(first(eg_pairs)) < start(second(eg_pairs)) ~ TRUE,
+    gene_strand == "-" & start(first(eg_pairs)) > end(second(eg_pairs)) ~ TRUE,
+    TRUE ~ FALSE
+  )
+  
   # set distance of upstream interactions to negative numbers
-  upstream_pairs <- end(first(eg_pairs)) < start(second(eg_pairs))
   distance[upstream_pairs] <- distance[upstream_pairs] * -1
   
   # add distance to etp table

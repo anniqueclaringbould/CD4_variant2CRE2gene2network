@@ -1,4 +1,6 @@
-## Compute TPM values form gene expression matrix
+## Compute TPM values from gene expression matrix. This is technically computing-counts-per-million
+## (CPM) based on 3' UMI counts. Since each UMI represents one molecule (i.e. transcript), this
+## calculation is equivalent to transcripts-per-million (TPM) 
 
 suppressPackageStartupMessages({
   library(data.table)
