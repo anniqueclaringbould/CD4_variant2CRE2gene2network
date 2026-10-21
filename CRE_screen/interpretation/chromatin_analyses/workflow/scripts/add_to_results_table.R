@@ -31,7 +31,8 @@ compute_distance <- function(etp, feature = c("tss", "gene"),
   # GRanges object for all TSS or genes in ETP table
   if (feature == "tss") {
     feat <- makeGRangesFromDataFrame(etp, seqnames.field = "gene_chr", start.field = "gene_tss",
-                                     end = "gene_tss", keep.extra.columns = TRUE)
+                                     end = "gene_tss", strand.field = "gene_strand",
+                                     keep.extra.columns = TRUE)
   } else {
     feat <- makeGRangesFromDataFrame(etp, seqnames.field = "gene_chr", start.field = "gene_start",
                                      end = "gene_end", strand.field = "gene_strand",

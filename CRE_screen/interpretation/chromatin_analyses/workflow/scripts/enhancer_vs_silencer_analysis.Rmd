@@ -29,7 +29,6 @@ library(rtracklayer)
 class_colors <- c(enhancer = "steelblue", silencer = "red3")
 ```
 
-
 ***
 
 ## Used data
@@ -93,7 +92,7 @@ prop_int_class_dist <- sig_distal_hits %>%
   mutate(prop = n / sum(n))
 
 # plot effect sizes as function of distance to TSS
-p1 <- ggplot(sig_distal_hits, aes(x = dist_to_tss, y = log_2_fold_change, color = int_class)) +
+p1 <- ggplot(sig_distal_hits, aes(x = abs(dist_to_tss), y = log_2_fold_change, color = int_class)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
   geom_vline(xintercept = c(1e4, 1e5, 1e6), linetype = "dashed", color = "gray") +
   labs(title = "Effect size vs. distance", x = "Distance to TSS (bp)", y = "Log2 fold change",
@@ -113,7 +112,8 @@ p2 <- ggplot(prop_int_class_dist, aes(x = distToTSS_bin, y = prop, fill = int_cl
   theme_classic()
 
 # arrange into one figure
-plot_grid(p1, p2, nrow = 1, rel_widths = c(1, 0.75))
+es_plot <- plot_grid(p1, p2, nrow = 1, rel_widths = c(1, 0.75))
+es_plot
 ```
 
 Overall `r round(mean(sig_distal_hits$int_class == "silencer") * 100, digits = 2)` of CRE-gene
@@ -218,14 +218,15 @@ p1 <- ggplot(gasp_sig, aes(x = abs(distToTSS), y = log_2_fold_change, color = in
 p2 <- ggplot(gasp_prop, aes(x = distToTSS_bin, y = prop, fill = int_class)) +
   geom_col(position = "fill") +
   geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray") +
-  labs(title = "Proportion effect direction Gasperini et al., 2019", x = "Distance to TSS (bin)",
+  labs(title = "Proportion effect direction", x = "Distance to TSS (bin)",
        y = "Proportion of CRE-gene interactions", fill = "Interaction class") +
   scale_fill_manual(values = class_colors) +
   theme_classic() +
   theme(strip.background = element_blank())
 
 # arrange into one figure
-plot_grid(p1, p2, nrow = 1, rel_widths = c(1, 0.75))
+es_plot_gasp <- plot_grid(p1, p2, nrow = 1, rel_widths = c(1, 0.75))
+es_plot_gasp
 ```
 
 Although the Gasperini et al., 2019 dataset does not have as many silencers close to the TSS, it has
@@ -327,7 +328,7 @@ enh_signal <- sig_distal_hits %>%
 p_enh_signal <- ggplot(enh_signal, aes(x = h3k27ac + 1, y = dnase + 1, color = int_class)) +
   geom_point(alpha = 0.5) +
   labs(title = "Accessibility vs. H3K27ac at perturbed elements",
-       x = "H3K27ac (FC over control + 1)", y = "DNase-seq (FC over control + 1)",
+       x = "H3K27ac (FC over control + 1)", y = "DNase-seq (Read-depth norm. signal + 1)",
        color = "Interaction class") +
   scale_color_manual(values = class_colors) +
   scale_x_log10() +
@@ -370,7 +371,9 @@ p_marg <- insert_yaxis_grob(p_marg, y_marg$dens, unit(0.2, "null"), position = "
 p_marg <- insert_yaxis_grob(p_marg, y_marg$box, unit(0.12, "null"), position = "right")
 
 # add the legend back next to the assembled figure
-plot_grid(ggdraw(p_marg), get_legend(p_enh_signal), nrow = 1, rel_widths = c(1, 0.25))
+dnase_vs_h3k27ac_plot <- plot_grid(ggdraw(p_marg), get_legend(p_enh_signal), nrow = 1,
+                                   rel_widths = c(1, 0.25))
+dnase_vs_h3k27ac_plot
 ```
 
 The marginal distributions show that silencer-like elements are shifted towards lower H3K27ac,
@@ -390,16 +393,19 @@ enh_signal <- mutate(enh_signal, h3k27ac_dnase_ratio = (h3k27ac + 1) / (dnase + 
 ratio_test <- wilcox.test(h3k27ac_dnase_ratio ~ int_class, data = enh_signal)
 
 # plot ratio per interaction class
-ggplot(enh_signal, aes(x = int_class, y = h3k27ac_dnase_ratio, fill = int_class)) +
+dnase_vs_h3k27ac_ratio_plot <- ggplot(enh_signal,
+                                      aes(x = int_class, y = h3k27ac_dnase_ratio, fill = int_class)) +
   geom_boxplot(outlier.shape = NA) +
   geom_jitter(width = 0.15, size = 0.8, alpha = 0.5) +
   labs(title = "H3K27ac / DNase-seq ratio",
        subtitle = paste("Wilcoxon p =", format.pval(ratio_test$p.value, digits = 2)),
-       x = "Interaction class", y = "H3K27ac / DNase-seq (FC over control + 1)") +
+       x = "Interaction class", y = "H3K27ac / DNase-seq") +
   scale_fill_manual(values = class_colors) +
   scale_y_log10() +
   theme_classic() +
   theme(legend.position = "none")
+
+dnase_vs_h3k27ac_ratio_plot
 ```
 
 Silencer-like pairs indeed have a roughly two-fold lower H3K27ac/DNase-seq ratio than
@@ -454,7 +460,7 @@ ratio_boxplot <- function(ratio, label) {
     geom_boxplot(outlier.shape = NA) +
     geom_jitter(width = 0.15, size = 0.8, alpha = 0.5) +
     labs(title = label, subtitle = paste("Wilcoxon p =", format.pval(ratio_test$p.value, digits = 2)),
-         x = "Interaction class", y = paste(label, "(FC over control + 1)")) +
+         x = "Interaction class", y = label) +
     scale_fill_manual(values = class_colors) +
     scale_y_log10() +
     theme_classic() +
@@ -462,8 +468,10 @@ ratio_boxplot <- function(ratio, label) {
 }
 
 # arrange both ratios into one figure
-plot_grid(ratio_boxplot("ctcf_dnase_ratio", "CTCF / DNase-seq"),
-          ratio_boxplot("ctcf_h3k27ac_ratio", "CTCF / H3K27ac"), nrow = 1)
+dnase_ctcf_ratio_plot <- plot_grid(ratio_boxplot("ctcf_dnase_ratio", "CTCF / DNase-seq"),
+                                   ratio_boxplot("ctcf_h3k27ac_ratio", "CTCF / H3K27ac"), nrow = 1)
+
+dnase_ctcf_ratio_plot
 ```
 Indeed, silencer-like elements have a higher CTCF/H3K27ac ratio as expected if these elements would
 be enriched for CTCF sites
@@ -498,7 +506,7 @@ prop_ctcf_peak <- elements_ctcf %>%
   summarize(n = n(), n_ctcf = sum(ctcf_peak), prop = n_ctcf / n)
 
 # plot proportion of elements overlapping a CTCF peak
-ggplot(prop_ctcf_peak, aes(x = int_class, y = prop, fill = int_class)) +
+ctcf_peaks_plot <- ggplot(prop_ctcf_peak, aes(x = int_class, y = prop, fill = int_class)) +
   geom_col() +
   geom_text(aes(label = paste0(n_ctcf, "/", n)), vjust = -0.5, size = 3) +
   labs(title = "Elements overlapping a CTCF peak",
@@ -510,6 +518,8 @@ ggplot(prop_ctcf_peak, aes(x = int_class, y = prop, fill = int_class)) +
                      limits = c(0, 0.35)) +
   theme_classic() +
   theme(legend.position = "none")
+
+ctcf_peaks_plot
 ```
 
 `r round(filter(prop_ctcf_peak, int_class == "silencer")$prop * 100, digits = 1)`% of silencer-like
@@ -601,6 +611,42 @@ ggplot(cres, aes(x = elem_class, y = tpm, fill = elem_class)) +
 ```
 
 Again, no clear difference here.
+
+***
+
+Combine selected plots into one figure and save to pdf.
+```{r}
+# titles for effect sizes and direction plots in different datasets
+title_this_study <- ggdraw() + 
+  draw_label("This study", fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 33))
+
+title_gasp <- ggdraw() + 
+  draw_label("Gasperini et al., 2019", fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 33))
+
+# combine figures for both datasets into one figure with 2 panels
+es_plot_datasets <- plot_grid(
+  plot_grid(title_this_study, es_plot, ncol = 1, rel_heights = c(0.1, 1), scale = 0.9),
+  plot_grid(title_gasp, es_plot_gasp, ncol = 1, rel_heights = c(0.1, 1), scale = 0.9),
+  ncol = 1, labels = c("A", "B"))
+
+# combine dnase vs h3k27ac plots into one figure row
+dnase_vs_h3k27ac <- plot_grid(dnase_vs_h3k27ac_plot, dnase_vs_h3k27ac_ratio_plot, nrow = 1,
+                              labels = c("C", "D"), rel_widths = c(1, 0.5), scale = 0.9)
+
+# combine ctcf plots into one figure row
+dnase_vs_ctcf <- plot_grid(dnase_ctcf_ratio_plot, ctcf_peaks_plot, nrow = 1, labels = c("E", "F"),
+                           rel_widths = c(1, 0.5), scale = 0.9)
+
+# arrange all plots into one draft supplementary figure
+supp_fig <- plot_grid(es_plot_datasets, dnase_vs_h3k27ac, dnase_vs_ctcf, ncol = 1,
+                      rel_heights = c(1, 0.55, 0.55))
+
+# save to file
+ggsave(filename = "results/plots/enhancers_vs_silencers.pdf", plot = supp_fig, width = 10,
+       height = 14)
+```
 
 ***
 
