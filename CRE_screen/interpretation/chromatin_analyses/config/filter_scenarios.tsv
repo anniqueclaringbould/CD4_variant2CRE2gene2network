@@ -1,0 +1,11 @@
+filter_scenario	readable_scenario	color
+published	Main Figure	#4299d4
+promwin_500	Promoter window: +/- 500bp	#e3a509
+promwin_5000	Promoter window: +/- 5000bp	#edd087
+intergenic_only	Interactions: only intergenic-distal	#376601
+drop_intragenic_distal	Interactions: no intragenic-distal	#6A9736
+drop_promoter_distal	Interactions: no promoter-distal	#9DC96B
+all_intragenic	Interactions: all intergenic and intragenic	#d0faa0
+rescue_tested	Not intergenic: proximal gene tested + negative	#7c14a6
+rescue_none	Not intergenic: all allowed	#c96ded
+no_filter_matched_bg	No filters	#a9a9a9
